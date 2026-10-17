@@ -26,6 +26,7 @@ export const APP_IDS: AppId[] = [
   "openclaw",
   "hermes",
   "pi",
+  "deepseek-harness",
   "mcode",
 ];
 
@@ -39,11 +40,16 @@ export const DEFAULT_VISIBLE_APPS: VisibleApps = {
   openclaw: true,
   hermes: true,
   pi: true,
+  "deepseek-harness": true,
   mcode: true,
 };
 
 /** App IDs shown in Skills panels. */
-export const SKILLS_APP_IDS: AppId[] = [
+export type SkillsAppId = Exclude<
+  AppId,
+  "claude-desktop" | "openclaw" | "deepseek-harness"
+>;
+export const SKILLS_APP_IDS: SkillsAppId[] = [
   "claude",
   "codex",
   "gemini",
@@ -248,6 +254,21 @@ export const APP_ICON_MAP: Record<AppId, AppConfig> = {
       "bg-fuchsia-500/10 ring-1 ring-fuchsia-500/20 hover:bg-fuchsia-500/20 text-fuchsia-600 dark:text-fuchsia-400",
     badgeClass:
       "bg-fuchsia-500/10 text-fuchsia-700 dark:text-fuchsia-300 hover:bg-fuchsia-500/20 border-0 gap-1.5",
+  },
+  "deepseek-harness": {
+    label: "DeepSeek Harness",
+    icon: (
+      <ProviderIcon
+        icon="deepseek"
+        name="DeepSeek Harness"
+        size={14}
+        showFallback={false}
+      />
+    ),
+    activeClass:
+      "bg-sky-500/10 ring-1 ring-sky-500/20 hover:bg-sky-500/20 text-sky-600 dark:text-sky-400",
+    badgeClass:
+      "bg-sky-500/10 text-sky-700 dark:text-sky-300 hover:bg-sky-500/20 border-0 gap-1.5",
   },
 };
 

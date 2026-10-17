@@ -1237,6 +1237,40 @@ async fn get_single_tool_version_impl(
     }
 }
 
+#[cfg(target_os = "macos")]
+fn try_get_dsh_desktop_version() -> ShellProbe {
+    let plist = std::path::Path::new("/Applications/DSH Desktop.app/Contents/Info.plist");
+    if !plist.exists() {
+        return ShellProbe::NotFound(NOT_INSTALLED.to_string());
+    }
+    match std::process::Command::new("/usr/bin/plutil")
+        .args(["-extract", "CFBundleShortVersionString", "raw", "-o", "-"])
+        .arg(plist)
+        .output()
+    {
+        Ok(output) if output.status.success() => {
+            let version = decode_command_output(&output.stdout).trim().to_string();
+            if version.is_empty() {
+                ShellProbe::FoundButFailed("DSH Desktop version is missing".to_string())
+            } else {
+                ShellProbe::Found(version)
+            }
+        }
+        Ok(output) => {
+            ShellProbe::FoundButFailed(last_lines(decode_command_output(&output.stderr).trim(), 4))
+        }
+        Err(error) => ShellProbe::FoundButFailed(format!("Unable to inspect DSH Desktop: {error}")),
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn try_get_dsh_desktop_version() -> ShellProbe {
+    // DSH Desktop is only distributed as a macOS .app; other platforms have no
+    // standalone desktop bundle to probe (their DSH CLI detection goes through
+    // try_get_version / try_get_version_wsl in the environment-check flow).
+    ShellProbe::NotFound("DSH Desktop is only available on macOS".to_string())
+}
+
 /// 该工具在 npm 上的预发布通道 tag(靠前者优先)。仅当本地版本已**严格领先**
 /// `latest` 时才会被补查 —— 让主动在抢先通道的用户(如走 Claude Code 的 `next`)
 /// 看到与所在通道对齐的"最新版本",同时绝不把稳定通道用户暴露给预发布版。

@@ -2335,6 +2335,11 @@ requires_openai_auth = true
             .expect("set current provider");
         crate::settings::set_current_provider(&AppType::ClaudeDesktop, Some("p1"))
             .expect("set local current provider");
+        let mut proxy_config = db.get_proxy_config().await.expect("get proxy config");
+        proxy_config.listen_port = 0;
+        db.update_proxy_config(proxy_config)
+            .await
+            .expect("set test proxy config to an ephemeral port");
 
         // 路由模式路由到这张映射卡：编辑它要按新行重写指向本地路由的 profile。
         crate::mode::controller::enter_with_route(
@@ -5457,6 +5462,9 @@ impl ProviderService {
         if app_type == AppType::Pi {
             return pi::list(state);
         }
+        if app_type == AppType::DeepSeekHarness {
+            return deepseek_harness::list(state);
+        }
         if app_type == AppType::Mcode {
             let native = crate::mcode_config::get_providers()?;
             let mut saved = state.db.get_all_providers("mcode")?;
@@ -5572,6 +5580,9 @@ impl ProviderService {
     ) -> Result<bool, AppError> {
         if app_type == AppType::Pi {
             return pi::add(state, provider, add_to_live);
+        }
+        if app_type == AppType::DeepSeekHarness {
+            return deepseek_harness::add(state, provider, add_to_live);
         }
 
         let mut provider = provider;
@@ -6129,6 +6140,9 @@ impl ProviderService {
         if app_type == AppType::Pi {
             return pi::update(state, original_id, provider);
         }
+        if app_type == AppType::DeepSeekHarness {
+            return deepseek_harness::update(state, original_id, provider);
+        }
 
         let mut provider = provider;
         let original_id = original_id.unwrap_or(provider.id.as_str()).to_string();
@@ -6409,6 +6423,9 @@ impl ProviderService {
         if app_type == AppType::Pi {
             return pi::delete(state, id);
         }
+        if app_type == AppType::DeepSeekHarness {
+            return deepseek_harness::delete(state, id);
+        }
 
         // Additive mode apps - no current provider concept
         if app_type.is_additive_mode() {
@@ -6527,6 +6544,9 @@ impl ProviderService {
             AppType::Hermes => {
                 remove_hermes_provider_from_live(id)?;
             }
+            AppType::DeepSeekHarness => {
+                deepseek_harness::remove_from_live(state, id)?;
+            }
             AppType::Mcode => crate::mcode_config::remove_provider(id)?,
             _ => {
                 return Err(AppError::Message(format!(
@@ -6583,6 +6603,9 @@ impl ProviderService {
     ) -> Result<SwitchResult, AppError> {
         if app_type == AppType::Pi {
             return pi::enable(state, id);
+        }
+        if app_type == AppType::DeepSeekHarness {
+            return deepseek_harness::enable(state, id);
         }
 
         // Check if provider exists
@@ -7017,7 +7040,7 @@ impl ProviderService {
             AppType::OpenCode => Self::extract_opencode_common_config(&provider.settings_config),
             AppType::OpenClaw => Self::extract_openclaw_common_config(&provider.settings_config),
             AppType::Hermes => Ok(String::new()), // Hermes doesn't use common config snippets
-            AppType::Pi | AppType::Mcode => Ok(String::new()),
+            AppType::Pi | AppType::DeepSeekHarness | AppType::Mcode => Ok(String::new()),
         }
     }
 
@@ -7035,7 +7058,7 @@ impl ProviderService {
             AppType::OpenCode => Self::extract_opencode_common_config(settings_config),
             AppType::OpenClaw => Self::extract_openclaw_common_config(settings_config),
             AppType::Hermes => Ok(String::new()), // Hermes doesn't use common config snippets
-            AppType::Pi | AppType::Mcode => Ok(String::new()),
+            AppType::Pi | AppType::DeepSeekHarness | AppType::Mcode => Ok(String::new()),
         }
     }
 
@@ -7797,6 +7820,18 @@ impl ProviderService {
                     ));
                 }
             }
+            AppType::DeepSeekHarness => {
+                serde_json::from_value::<
+                    crate::deepseek_harness_config::DeepSeekHarnessProviderConfig,
+                >(provider.settings_config.clone())
+                .map_err(|error| {
+                    AppError::localized(
+                        "provider.deepseek_harness.settings.invalid",
+                        format!("DeepSeek Harness 配置无效：{error}"),
+                        format!("Invalid DeepSeek Harness configuration: {error}"),
+                    )
+                })?;
+            }
             AppType::Mcode => {
                 crate::mcode_config::validate_provider(&provider.id, &provider.settings_config)?
             }
@@ -8019,6 +8054,30 @@ impl ProviderService {
                 let base_url = provider
                     .settings_config
                     .get("baseUrl")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+
+                Ok((api_key, base_url))
+            }
+            AppType::DeepSeekHarness => {
+                let api_key = provider
+                    .settings_config
+                    .get("apiKey")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| {
+                        AppError::localized(
+                            "provider.deepseek_harness.api_key.missing",
+                            "缺少 API Key",
+                            "API key is missing",
+                        )
+                    })?
+                    .to_string();
+
+                let base_url = provider
+                    .settings_config
+                    .get("baseURL")
+                    .or_else(|| provider.settings_config.get("baseUrl"))
                     .and_then(|v| v.as_str())
                     .unwrap_or("")
                     .to_string();

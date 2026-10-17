@@ -124,6 +124,8 @@ import {
   useDisableCurrentOmoSlim,
 } from "@/lib/query/omo";
 import { invalidatePiProviderCaches, usePiCurrentState } from "@/lib/query/pi";
+import { dshApi } from "@/lib/api/dsh";
+import { invalidateDshProviderCaches, dshKeys } from "@/lib/query/dsh";
 import WorkspaceFilesPanel from "@/components/workspace/WorkspaceFilesPanel";
 import EnvPanel from "@/components/openclaw/EnvPanel";
 import ToolsPanel from "@/components/openclaw/ToolsPanel";
@@ -362,6 +364,41 @@ function App() {
     }
   };
 
+  const handleSetDshDefaultModel = async (
+    provider: Provider,
+    modelId?: string,
+  ) => {
+    const config = provider.settingsConfig as {
+      models?: Array<{ id?: string } | string>;
+    };
+    const firstModel = config.models?.[0];
+    const resolved =
+      modelId ?? (typeof firstModel === "string" ? firstModel : firstModel?.id);
+    if (!resolved) {
+      toast.error(
+        t("dsh.provider.noModels", {
+          defaultValue: "该供应商没有配置模型",
+        }),
+      );
+      return;
+    }
+    try {
+      await dshApi.setCurrentModel(provider.id, resolved);
+      await invalidateDshProviderCaches(queryClient);
+      toast.success(
+        t("dsh.provider.defaultSet", { defaultValue: "已设为 DSH 默认模型" }),
+        { closeButton: true },
+      );
+    } catch (error) {
+      toast.error(
+        t("dsh.provider.defaultFailed", {
+          defaultValue: "设置 DSH 默认模型失败",
+        }),
+        { description: extractErrorMessage(error), closeButton: true },
+      );
+    }
+  };
+
   const disableOmoMutation = useDisableCurrentOmo();
   const handleDisableOmo = () => {
     disableOmoMutation.mutate(undefined, {
@@ -411,6 +448,9 @@ function App() {
             });
             if (event.appType === "pi") {
               await invalidatePiProviderCaches(queryClient);
+            }
+            if (event.appType === "deepseek-harness") {
+              await invalidateDshProviderCaches(queryClient);
             }
           },
         );
@@ -809,6 +849,9 @@ function App() {
         if (activeApp === "pi") {
           void invalidatePiProviderCaches(queryClient).catch(() => undefined);
         }
+        if (activeApp === "deepseek-harness") {
+          void invalidateDshProviderCaches(queryClient).catch(() => undefined);
+        }
         toast.error(t("notifications.removeFromConfigFailed"), {
           description: description || t("common.unknown"),
           closeButton: true,
@@ -817,6 +860,9 @@ function App() {
       }
       if (activeApp === "pi") {
         await invalidatePiProviderCaches(queryClient);
+      }
+      if (activeApp === "deepseek-harness") {
+        await invalidateDshProviderCaches(queryClient);
       }
       // Invalidate queries to refresh the isInConfig state
       if (activeApp === "opencode") {
@@ -926,7 +972,8 @@ function App() {
       activeApp === "opencode" ||
       activeApp === "openclaw" ||
       activeApp === "hermes" ||
-      activeApp === "pi"
+      activeApp === "pi" ||
+      activeApp === "deepseek-harness"
     ) {
       let liveProviderIds: string[] = [];
       try {
@@ -946,12 +993,19 @@ function App() {
                     queryKey: hermesKeys.liveProviderIds,
                     queryFn: () => providersApi.getHermesLiveProviderIds(),
                   })
-                : (
-                    await queryClient.ensureQueryData({
-                      queryKey: ["pi", "currentState"],
-                      queryFn: () => piApi.getCurrentState(),
-                    })
-                  ).enabledProviderIds;
+                : activeApp === "pi"
+                  ? (
+                      await queryClient.ensureQueryData({
+                        queryKey: ["pi", "currentState"],
+                        queryFn: () => piApi.getCurrentState(),
+                      })
+                    ).enabledProviderIds
+                  : (
+                      await queryClient.ensureQueryData({
+                        queryKey: dshKeys.currentState,
+                        queryFn: () => dshApi.getCurrentState(),
+                      })
+                    ).providerIds;
       } catch (error) {
         console.error(
           "[App] Failed to load live provider IDs for duplication",

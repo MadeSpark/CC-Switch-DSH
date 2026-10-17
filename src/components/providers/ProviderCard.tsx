@@ -419,6 +419,22 @@ export function ProviderCard({
                   })}
                 </span>
               )}
+
+              {appId === "deepseek-harness" && dshModels.length > 0 && (
+                <ProviderStatusBadge
+                  tone="info"
+                  label={`${dshModels.length} ${t("provider.models", { defaultValue: "models" })}`}
+                />
+              )}
+
+              {appId === "deepseek-harness" &&
+                isCurrent &&
+                provider.meta?.dshCurrentModel && (
+                  <ProviderStatusBadge
+                    tone="success"
+                    label={provider.meta.dshCurrentModel}
+                  />
+                )}
             </div>
           ) : displayUrl ? (
             <button

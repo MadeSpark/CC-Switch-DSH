@@ -628,7 +628,12 @@ describe("PiProviderForm", () => {
     );
   });
 
-  it("stores Pi-native request headers without mixing them with API-key auth", async () => {
+  // These two exercise the heaviest form flows and can exceed the 5s default
+  // on CI runners (two-core, cold caches).
+  it(
+    "stores Pi-native request headers without mixing them with API-key auth",
+    { timeout: 20_000 },
+    async () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     render(
@@ -1491,7 +1496,10 @@ describe("PiProviderForm", () => {
     });
   });
 
-  it("edits Pi thinking-map missing, null, and string states from the collapsed capability area", async () => {
+  it(
+    "edits Pi thinking-map missing, null, and string states from the collapsed capability area",
+    { timeout: 20_000 },
+    async () => {
     const user = userEvent.setup();
     // Start with a model so this test exercises thinking-map interactions without
     // repeating the separately covered preset selection and model creation flow.

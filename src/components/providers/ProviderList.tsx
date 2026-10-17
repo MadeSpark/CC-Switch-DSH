@@ -209,6 +209,10 @@ export function ProviderList({
       if (appId === "claude-desktop") {
         return (await providersApi.importClaudeDesktopFromClaude()) > 0;
       }
+      if (appId === "deepseek-harness") {
+        const count = await providersApi.importDeepSeekHarnessFromLive();
+        return count > 0;
+      }
       return providersApi.importDefault(appId);
     },
     onSuccess: (imported) => {
