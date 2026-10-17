@@ -492,7 +492,9 @@ function ProviderFormFull({
                   ? OPENCLAW_DEFAULT_CONFIG
                   : appId === "hermes"
                     ? HERMES_DEFAULT_CONFIG
-                    : CLAUDE_DEFAULT_CONFIG,
+                    : appId === "deepseek-harness"
+                      ? JSON.stringify(DSH_CUSTOM_DEFAULT_CONFIG, null, 2)
+                      : CLAUDE_DEFAULT_CONFIG,
       icon: initialData?.icon ?? "",
       iconColor: initialData?.iconColor ?? "",
     }),

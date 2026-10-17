@@ -5,7 +5,7 @@ import type { SessionMeta } from "@/types";
 
 export const UNKNOWN_PROJECT_DIR_KEY = "__unknown_project_dir__";
 
-/** 会话来源：9 个应用（Claude Desktop 没有自己的会话记录，用 Claude Code 的）。 */
+/** 会话来源：Claude Desktop 没有自己的会话记录，用 Claude Code 的。 */
 export const SESSION_APP_IDS = [
   "claude",
   "codex",
@@ -13,6 +13,7 @@ export const SESSION_APP_IDS = [
   "hermes",
   "gemini",
   "pi",
+  "deepseek-harness",
   "grokbuild",
   "openclaw",
   "mcode",
@@ -33,6 +34,7 @@ export const SESSION_SOURCE_PATHS: Record<SessionAppId, string[]> = {
   openclaw: ["~/.openclaw/agents/<agent>/sessions"],
   hermes: ["~/.hermes/state.db", "~/.hermes/sessions"],
   pi: ["~/.pi/agent/sessions"],
+  "deepseek-harness": ["~/.dsh/sessions"],
   mcode: ["~/.minimax"],
 };
 

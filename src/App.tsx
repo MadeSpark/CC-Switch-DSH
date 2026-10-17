@@ -923,6 +923,20 @@ function App() {
   };
 
   const handleDuplicateProvider = async (provider: Provider) => {
+    // DSH 官方路由按固定 key 绑定原生适配器，复制后会与官方路由冲突。
+    if (
+      activeApp === "deepseek-harness" &&
+      (provider.id === "deepseek-official" ||
+        provider.meta?.providerType === "dsh_deepseek")
+    ) {
+      toast.error(
+        t("deepseekHarness.officialNotCopyable", {
+          defaultValue: "官方 DeepSeek 路由不可复制",
+        }),
+      );
+      return;
+    }
+
     if (
       activeApp === "opencode" &&
       provider.category !== "omo" &&
@@ -1365,7 +1379,8 @@ function App() {
               activeApp === "openclaw" ||
               activeApp === "hermes" ||
               activeApp === "pi" ||
-              activeApp === "mcode"
+              activeApp === "mcode" ||
+              activeApp === "deepseek-harness"
                 ? (provider) => setConfirmAction({ provider, action: "remove" })
                 : undefined
             }
@@ -1379,9 +1394,12 @@ function App() {
               activeApp === "openclaw"
                 ? (provider, modelId) =>
                     void setAsDefaultModel(provider, modelId)
-                : activeApp === "hermes"
-                  ? (provider) => void switchProvider(provider)
-                  : undefined
+                : activeApp === "deepseek-harness"
+                  ? (provider, modelId) =>
+                      void handleSetDshDefaultModel(provider, modelId)
+                  : activeApp === "hermes"
+                    ? (provider) => void switchProvider(provider)
+                    : undefined
             }
           />
         </div>

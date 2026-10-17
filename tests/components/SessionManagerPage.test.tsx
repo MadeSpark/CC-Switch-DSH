@@ -8,7 +8,10 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { UNKNOWN_PROJECT_DIR_KEY } from "@/components/sessions/utils";
+import {
+  SESSION_APP_IDS,
+  UNKNOWN_PROJECT_DIR_KEY,
+} from "@/components/sessions/utils";
 import { SessionManagerPage } from "@/components/sessions/SessionManagerPage";
 import { piApi } from "@/lib/api/pi";
 import { sessionsApi } from "@/lib/api/sessions";
@@ -95,6 +98,9 @@ describe("SessionManagerPage", () => {
     });
 
     const now = Date.now();
+    // 时间分桶按自然日切；凌晨跑测试时「30 分钟前」会掉进昨天，导致
+    // 「按时间」用例找不到「今天」分组。这里把 Claude 会话钉在今天内。
+    const todayStart = new Date(now).setHours(0, 0, 0, 0);
     const sessions: SessionMeta[] = [
       {
         providerId: "codex",
@@ -125,7 +131,7 @@ describe("SessionManagerPage", () => {
         summary: "Claude summary",
         projectDir: "/mock/claude",
         createdAt: now - 2 * HOUR,
-        lastActiveAt: now - 30 * 60 * 1000,
+        lastActiveAt: Math.max(now - 30 * 60 * 1000, todayStart + 60 * 1000),
         sourcePath: "/mock/claude/session-1.jsonl",
         resumeCommand: "claude --resume claude-session-1",
       },
@@ -256,8 +262,8 @@ describe("SessionManagerPage", () => {
     await openAppMenu();
     const menu = await screen.findByRole("menu");
     const items = within(menu).getAllByRole("menuitemradio");
-    // 全部应用 + 9 个来源，按会话数从多到少
-    expect(items).toHaveLength(10);
+    // 全部应用加上所有已注册的来源，按会话数排序。
+    expect(items).toHaveLength(1 + SESSION_APP_IDS.length);
     expect(items[0]).toHaveTextContent("全部应用5");
     expect(items[1]).toHaveTextContent("Codex3");
     expect(items[items.length - 1]).toHaveTextContent("无会话");
@@ -287,6 +293,7 @@ describe("SessionManagerPage", () => {
         openclaw: false,
         hermes: false,
         pi: false,
+        "deepseek-harness": false,
         mcode: false,
       },
     });

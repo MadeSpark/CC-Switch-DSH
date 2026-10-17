@@ -13,7 +13,7 @@ function readStored(): AppId[] | null {
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return null;
     const apps = parsed.filter((app): app is AppId =>
-      SKILLS_APP_IDS.includes(app as AppId),
+      SKILLS_APP_IDS.includes(app as (typeof SKILLS_APP_IDS)[number]),
     );
     return apps.length ? apps : null;
   } catch {

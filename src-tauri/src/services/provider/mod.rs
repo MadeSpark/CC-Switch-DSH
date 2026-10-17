@@ -9,6 +9,7 @@ pub(crate) mod codex_direct;
 mod codex_editor;
 mod codex_login;
 pub(crate) mod codex_official_models;
+mod deepseek_harness;
 mod editor_toml;
 mod endpoints;
 mod gemini_auth;
@@ -44,6 +45,18 @@ pub use live::{
 
 pub fn import_pi_providers_from_live(state: &AppState) -> Result<usize, AppError> {
     pi::import_from_live(state)
+}
+
+pub fn import_deepseek_harness_providers_from_live(state: &AppState) -> Result<usize, AppError> {
+    deepseek_harness::import_from_live(state)
+}
+
+pub fn set_dsh_current_model(
+    state: &AppState,
+    provider_id: &str,
+    model_id: &str,
+) -> Result<(), AppError> {
+    deepseek_harness::set_current_model(state, provider_id, model_id)
 }
 
 pub use claude_editor::{EditorSave, EditorView};
@@ -5503,6 +5516,10 @@ impl ProviderService {
         // Additive mode apps have no "current" provider concept
         if app_type.is_additive_mode() {
             return Ok(String::new());
+        }
+        if app_type == AppType::DeepSeekHarness {
+            return crate::deepseek_harness_config::read_native_state()
+                .map(|state| state.current_provider.unwrap_or_default());
         }
         // 代理模式下界面上的「当前」是代理路由到的那家。
         crate::mode::current::provider_for(

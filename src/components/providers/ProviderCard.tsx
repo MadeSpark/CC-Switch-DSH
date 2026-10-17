@@ -34,6 +34,7 @@ import { useUsageQuery } from "@/lib/query/queries";
 import { resolveProviderIcon } from "@/utils/providerIcon";
 import { isAdditiveAppId, isProxyAppId } from "@/config/appConfig";
 import { ProviderCardActions } from "./ProviderCardActions";
+import { ProviderStatusBadge } from "@/components/providers/ProviderStatusBadge";
 import type { CardChip, CardPresentation, CardTone } from "./presentation";
 
 interface DragHandleProps {
@@ -217,6 +218,21 @@ export function ProviderCard({
     return extractApiUrl(provider, fallbackUrlText);
   }, [provider, fallbackUrlText]);
 
+  const dshModels = useMemo(() => {
+    if (appId !== "deepseek-harness") return [];
+    const models = (provider.settingsConfig as Record<string, unknown>)?.models;
+    if (!Array.isArray(models)) return [];
+    return models
+      .map((model) =>
+        typeof model === "string"
+          ? model.trim()
+          : model && typeof model === "object"
+            ? String((model as Record<string, unknown>).id ?? "").trim()
+            : "",
+      )
+      .filter(Boolean);
+  }, [appId, provider.settingsConfig]);
+
   const isClickableUrl = useMemo(() => {
     if (provider.notes?.trim()) {
       return false;
@@ -352,6 +368,12 @@ export function ProviderCard({
                 isHealthy={health.is_healthy}
               />
             )}
+            {appId === "deepseek-harness" && dshModels.length > 0 && (
+              <ProviderStatusBadge
+                tone="info"
+                label={`${dshModels.length} ${t("provider.models", { defaultValue: "models" })}`}
+              />
+            )}
           </div>
 
           {codexOfficialIdentity && codexOfficialIdentity !== "api_key" ? (
@@ -419,22 +441,6 @@ export function ProviderCard({
                   })}
                 </span>
               )}
-
-              {appId === "deepseek-harness" && dshModels.length > 0 && (
-                <ProviderStatusBadge
-                  tone="info"
-                  label={`${dshModels.length} ${t("provider.models", { defaultValue: "models" })}`}
-                />
-              )}
-
-              {appId === "deepseek-harness" &&
-                isCurrent &&
-                provider.meta?.dshCurrentModel && (
-                  <ProviderStatusBadge
-                    tone="success"
-                    label={provider.meta.dshCurrentModel}
-                  />
-                )}
             </div>
           ) : displayUrl ? (
             <button

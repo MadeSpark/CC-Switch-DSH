@@ -219,6 +219,7 @@ impl McpService {
             }
             AppType::Mcode => mcp::mcode::sync(&server.id, Some(&server.server))?,
             AppType::Pi => mcp::pi::sync(&server.id, Some(&server.server))?,
+            AppType::DeepSeekHarness => {}
         }
         Ok(())
     }
@@ -260,6 +261,7 @@ impl McpService {
             }
             AppType::Mcode => mcp::mcode::sync(id, None)?,
             AppType::Pi => mcp::pi::sync(id, None)?,
+            AppType::DeepSeekHarness => {}
         }
         Ok(())
     }

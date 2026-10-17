@@ -66,6 +66,7 @@ pub fn load_messages(path: &Path) -> Result<Vec<SessionMessage>, String> {
                         role: "user".to_string(),
                         content,
                         ts: event_time(value),
+                        ..SessionMessage::default()
                     });
                 }
             }
@@ -76,6 +77,7 @@ pub fn load_messages(path: &Path) -> Result<Vec<SessionMessage>, String> {
                         role: "assistant".to_string(),
                         content,
                         ts: event_time(value),
+                        ..SessionMessage::default()
                     });
                 }
             }
@@ -334,6 +336,11 @@ mod tests {
             assert_eq!(messages[0].role, "user");
             assert_eq!(messages[0].content, "hello dsh");
             assert_eq!(messages[0].ts, Some(1787220655606));
+            assert_eq!(messages[0].id, None);
+            assert_eq!(messages[0].turn_id, None);
+            assert!(!messages[0].injected);
+            assert!(messages[0].blocks.is_empty());
+            assert!(messages[0].meta.is_none());
             assert_eq!(messages[1].role, "assistant");
             assert_eq!(messages[1].content, "hi there");
         });

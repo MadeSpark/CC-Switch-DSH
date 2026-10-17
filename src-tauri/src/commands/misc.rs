@@ -170,8 +170,8 @@ pub struct ToolVersion {
     update_blocked_by_node: Option<tool_node_requirement::NodeRequirementGap>,
 }
 
-const VALID_TOOLS: [&str; 9] = [
-    "claude", "codex", "gemini", "grok", "opencode", "openclaw", "hermes", "pi", "mcode",
+const VALID_TOOLS: [&str; 10] = [
+    "claude", "codex", "gemini", "grok", "opencode", "openclaw", "hermes", "pi", "mcode", "dsh",
 ];
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -626,6 +626,7 @@ fn tool_display_name(tool: &str) -> &'static str {
         "hermes" => "Hermes",
         "pi" => "Pi",
         "mcode" => "MiniMax Code",
+        "dsh" => "DeepSeek Harness",
         _ => "Unknown",
     }
 }
@@ -1120,6 +1121,11 @@ fn probe_local_version(
     wsl_shell: Option<&str>,
     wsl_shell_flag: Option<&str>,
 ) -> ShellProbe {
+    // DSH Desktop 不是 PATH 上的 CLI，也没有可扫描的安装目录：macOS 上直接读
+    // .app 的 Info.plist，其余平台返回 NotFound（见 try_get_dsh_desktop_version）。
+    if tool == "dsh" {
+        return try_get_dsh_desktop_version();
+    }
     if let Some(distro) = wsl_distro {
         try_get_version_wsl(tool, distro, wsl_shell, wsl_shell_flag)
     } else {
@@ -1212,6 +1218,8 @@ async fn get_single_tool_version_impl(
             fetch_npm_latest_for_tool(&client, "@earendil-works/pi-coding-agent", tool, local).await
         }
         "mcode" => fetch_npm_latest_for_tool(&client, "@minimax-ai/code", tool, local).await,
+        // DSH Desktop 走自己的分发渠道，不在 npm/GitHub release 上查最新版。
+        "dsh" => None,
         _ => None,
     };
 
@@ -6648,6 +6656,24 @@ mod tests {
             false,
         );
         assert_eq!(mcode_receipt_install_root(&entry, layout), None);
+    }
+
+    #[test]
+    fn dsh_is_part_of_environment_checks() {
+        assert!(VALID_TOOLS.contains(&"dsh"));
+        assert_eq!(tool_display_name("dsh"), "DeepSeek Harness");
+        // The macOS probe shells out to a locally installed DSH Desktop; CI
+        // runners and machines without DSH must not fail the suite over it.
+        #[cfg(target_os = "macos")]
+        if !std::path::Path::new("/Applications/DSH Desktop.app/Contents/Info.plist").exists() {
+            eprintln!("DSH Desktop not installed; skipping the version probe");
+            return;
+        }
+        #[cfg(target_os = "macos")]
+        match try_get_dsh_desktop_version() {
+            ShellProbe::Found(version) => assert!(!version.is_empty()),
+            _ => panic!("installed DSH Desktop should be detected"),
+        }
     }
 
     #[test]

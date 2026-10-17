@@ -833,9 +833,21 @@ describe("App integration with MSW", () => {
     fireEvent.click(screen.getByText("duplicate"));
 
     await waitFor(() => {
-      const providerList = screen.getByTestId("provider-list").textContent;
-      expect(providerList).toContain("dsh-1-copy");
-      expect(providerList).toContain("Company Gateway copy");
+      const providers = JSON.parse(
+        screen.getByTestId("provider-list").textContent ?? "{}",
+      ) as Record<string, { id: string; name: string }>;
+      const copied = Object.entries(providers).find(
+        ([, item]) => item.name === "Company Gateway copy",
+      );
+      expect(copied).toBeDefined();
+      expect(copied?.[0]).not.toBe("dsh-1");
+      expect(copied?.[1].id).toBe(copied?.[0]);
+      expect(copied?.[0]).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+      );
+      expect(new Set(Object.keys(providers)).size).toBe(
+        Object.keys(providers).length,
+      );
     });
 
     expect(toastErrorMock).not.toHaveBeenCalledWith(

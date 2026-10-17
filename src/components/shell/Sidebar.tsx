@@ -25,7 +25,7 @@ import type { AppId } from "@/lib/api";
 import type { VisibleApps } from "@/types";
 import { APP_IDS } from "@/config/appConfig";
 import type { GlobalPage, SettingsSection, View } from "@/lib/navigation";
-import { isAppPage } from "@/lib/navigation";
+import { isAppPage, supportsMcp, supportsSkills } from "@/lib/navigation";
 import { SkillsIcon } from "@/components/BrandIcons";
 import { useUpdate } from "@/contexts/UpdateContext";
 import { sidebarWidth, useSidebarCollapsed } from "@/hooks/useSidebarCollapsed";
@@ -262,6 +262,9 @@ function MainDirectory({
       : undefined;
   const todayTrailing = todayValues.length > 1 ? todayValues : todayValues[0];
 
+  const hasMcpSupport = supportsMcp(activeApp);
+  const hasSkillsSupport = supportsSkills(activeApp);
+
   const globals: {
     page: GlobalPage;
     label: string;
@@ -270,8 +273,12 @@ function MainDirectory({
     trailingLabel?: string;
     alert?: string;
   }[] = [
-    { page: "mcp", label: "MCP", icon: Server },
-    { page: "skills", label: "Skills", icon: SkillsIcon },
+    ...(hasMcpSupport
+      ? [{ page: "mcp" as const, label: "MCP", icon: Server }]
+      : []),
+    ...(hasSkillsSupport
+      ? [{ page: "skills" as const, label: "Skills", icon: SkillsIcon }]
+      : []),
     { page: "prompts", label: t("nav.prompts"), icon: BookOpen },
     { page: "sessions", label: t("nav.sessions"), icon: History },
     {

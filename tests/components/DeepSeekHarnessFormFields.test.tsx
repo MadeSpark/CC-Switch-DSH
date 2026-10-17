@@ -196,9 +196,7 @@ describe("DeepSeekHarnessFormFields", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Fetch Models" }));
 
-    await waitFor(() =>
-      expect(fetchModelsForConfig).toHaveBeenCalledTimes(1),
-    );
+    await waitFor(() => expect(fetchModelsForConfig).toHaveBeenCalledTimes(1));
     expect(
       screen.queryByRole("button", { name: "Select model" }),
     ).not.toBeInTheDocument();

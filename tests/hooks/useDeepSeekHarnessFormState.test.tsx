@@ -184,9 +184,12 @@ describe("useDeepSeekHarnessFormState", () => {
   });
 
   it("updates the default model without touching settingsConfig", () => {
-    const { result, onSettingsConfigChange } = renderDshFormState(CUSTOM_CONFIG, {
-      category: "custom",
-    });
+    const { result, onSettingsConfigChange } = renderDshFormState(
+      CUSTOM_CONFIG,
+      {
+        category: "custom",
+      },
+    );
 
     act(() => {
       result.current.handleDshDefaultModelChange("glm-5");
@@ -197,7 +200,9 @@ describe("useDeepSeekHarnessFormState", () => {
   });
 
   it("resets to the official shape and back to custom defaults", () => {
-    const { result } = renderDshFormState(CUSTOM_CONFIG, { category: "custom" });
+    const { result } = renderDshFormState(CUSTOM_CONFIG, {
+      category: "custom",
+    });
 
     act(() => {
       result.current.resetDshState(OFFICIAL_CONFIG, true);
@@ -236,9 +241,9 @@ describe("useDeepSeekHarnessFormState", () => {
 describe("deepseekHarnessFormUtils", () => {
   it("detects official providers by the authoritative providerType", () => {
     // providerType wins over every other signal, in both directions.
-    expect(
-      isDshOfficial("custom", "custom", undefined, "dsh_deepseek"),
-    ).toBe(true);
+    expect(isDshOfficial("custom", "custom", undefined, "dsh_deepseek")).toBe(
+      true,
+    );
     expect(
       isDshOfficial("deepseek-official", "official", undefined, "dsh_pi_ai"),
     ).toBe(false);
@@ -250,7 +255,12 @@ describe("deepseekHarnessFormUtils", () => {
       isDshOfficial("custom", "custom", { apiKeyEnv: "DEEPSEEK_API_KEY" }),
     ).toBe(false);
     expect(
-      isDshOfficial("custom", "custom", { apiKeyEnv: "DEEPSEEK_API_KEY" }, "dsh_pi_ai"),
+      isDshOfficial(
+        "custom",
+        "custom",
+        { apiKeyEnv: "DEEPSEEK_API_KEY" },
+        "dsh_pi_ai",
+      ),
     ).toBe(false);
   });
 
@@ -308,10 +318,7 @@ describe("deepseekHarnessFormUtils", () => {
   });
 
   it("assigns stable client-only row keys without sharing them", () => {
-    const rows = withDshRowKeys([
-      { id: "a", rowKey: "kept" },
-      { id: "b" },
-    ]);
+    const rows = withDshRowKeys([{ id: "a", rowKey: "kept" }, { id: "b" }]);
     expect(rows[0].rowKey).toBe("kept");
     expect(rows[1].rowKey).toMatch(/^dsh-row-/);
     expect(rows[0].rowKey).not.toBe(rows[1].rowKey);

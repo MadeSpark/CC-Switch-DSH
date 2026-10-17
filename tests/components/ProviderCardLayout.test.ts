@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { extractProviderBaseUrl } from "@/utils/providerConfigUtils";
 
 const PROVIDER_CARD_TSX = path.resolve(
   __dirname,
@@ -37,8 +38,13 @@ describe("ProviderCard layout", () => {
     expect(source).not.toContain("extractPiModelSummaryItems");
   });
 
-  it("reads the official DSH baseURL field for card display", () => {
-    expect(source).toContain("object.baseURL");
+  it("uses the shared provider URL extractor for card display", () => {
+    expect(
+      extractProviderBaseUrl({ baseUrl: "https://gateway.example/v1" }),
+    ).toBe("https://gateway.example/v1");
+    expect(
+      extractProviderBaseUrl({ options: { baseURL: "https://proxy.example" } }),
+    ).toBe("https://proxy.example");
   });
 
   it("keeps Pi provider cards independent from routing capability state", () => {

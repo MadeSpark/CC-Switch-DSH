@@ -310,21 +310,23 @@ export function useDirectorySettings({
       setResolvedDirs((prev) => ({ ...prev, [key]: value ?? "" }));
       if (value !== undefined) continue;
 
-      void settingsApi.getConfigDir(key).then(
-        (resolved) => {
-          setResolvedDirs((prev) =>
-            directoryRevisionsRef.current[key] === revision
-              ? { ...prev, [key]: resolved }
-              : prev,
-          );
-        },
-        (error) => {
-          console.error(
-            "[useDirectorySettings] Failed to resolve config dir",
-            error,
-          );
-        },
-      );
+      void settingsApi
+        .getConfigDir(key === "dsh" ? "deepseek-harness" : key)
+        .then(
+          (resolved) => {
+            setResolvedDirs((prev) =>
+              directoryRevisionsRef.current[key] === revision
+                ? { ...prev, [key]: resolved }
+                : prev,
+            );
+          },
+          (error) => {
+            console.error(
+              "[useDirectorySettings] Failed to resolve config dir",
+              error,
+            );
+          },
+        );
     }
   }, [settings]);
 

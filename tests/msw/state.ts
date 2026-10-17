@@ -95,11 +95,11 @@ const createDefaultCurrent = (): CurrentProviderState => ({
 let providers = createDefaultProviders();
 let current = createDefaultCurrent();
 let liveProviderIds: LiveProviderIdsByApp = {
-    opencode: [],
-    openclaw: [],
-    hermes: [],
-    "deepseek-harness": [],
-  };
+  opencode: [],
+  openclaw: [],
+  hermes: [],
+  "deepseek-harness": [],
+};
 let settingsState: Settings = {
   showInTray: true,
   minimizeToTrayOnClose: true,

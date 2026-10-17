@@ -144,3 +144,14 @@ export function normalizeSettingsSection(
 export function sharedFeatureAppOf(app: AppId): AppId {
   return app === "claude-desktop" ? "claude" : app;
 }
+
+/** MCP 和 Skills 不是每个应用都支持；侧栏和页面守卫共用这些能力判定。 */
+export function supportsMcp(app: AppId): boolean {
+  const shared = sharedFeatureAppOf(app);
+  return shared !== "pi" && shared !== "deepseek-harness";
+}
+
+export function supportsSkills(app: AppId): boolean {
+  const shared = sharedFeatureAppOf(app);
+  return shared !== "openclaw" && shared !== "deepseek-harness";
+}

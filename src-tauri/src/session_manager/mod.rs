@@ -13,7 +13,9 @@ use std::time::Instant;
 
 // 其余模型类型从 `session_manager::model` 引用
 pub use model::SessionMessage;
-use providers::{claude, codex, gemini, grokbuild, hermes, mcode, openclaw, opencode, pi};
+use providers::{
+    claude, codex, deepseek_harness, gemini, grokbuild, hermes, mcode, openclaw, opencode, pi,
+};
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -216,6 +218,9 @@ fn delete_session_with_roots(
         "grokbuild" => grokbuild::delete_session(&validated_root, &validated_source, session_id),
         "hermes" => hermes::delete_session(&validated_root, &validated_source, session_id),
         "pi" => pi::delete_session(&validated_root, &validated_source, session_id),
+        "deepseek-harness" => {
+            deepseek_harness::delete_session(&validated_root, &validated_source, session_id)
+        }
         _ => Err(format!("Unsupported provider: {provider_id}")),
     }
 }

@@ -16,10 +16,7 @@ describe("appConfig provider lifecycle", () => {
     "gemini",
     "grokbuild",
     "deepseek-harness",
-  ])(
-    "does not classify %s as additive",
-    (appId) => {
-      expect(isAdditiveAppId(appId)).toBe(false);
-    },
-  );
+  ])("does not classify %s as additive", (appId) => {
+    expect(isAdditiveAppId(appId)).toBe(false);
+  });
 });

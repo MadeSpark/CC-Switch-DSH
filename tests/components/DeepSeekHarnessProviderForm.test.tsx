@@ -16,8 +16,7 @@ vi.mock("sonner", () => ({
 }));
 
 vi.mock("@/lib/api/model-fetch", async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import("@/lib/api/model-fetch")>();
+  const actual = await importOriginal<typeof import("@/lib/api/model-fetch")>();
   return {
     ...actual,
     fetchModelsForConfig: vi.fn().mockResolvedValue([]),
@@ -148,12 +147,17 @@ describe("DeepSeek Harness provider form (shared shell)", () => {
     const customButton = screen.getByRole("button", {
       name: "providerPreset.custom",
     });
-    expect(customButton.className).toContain("bg-blue-500");
+    expect(customButton).toBeInTheDocument();
+    expect(screen.getByLabelText(/Provider Key/)).toHaveValue("");
+    expect(
+      (screen.getByLabelText("dsh-settings-config") as HTMLTextAreaElement)
+        .value,
+    ).toContain("CUSTOM_DSH_API_KEY");
 
     const openAiButton = screen.getByRole("button", {
       name: /OpenAI Compatible/,
     });
-    expect(openAiButton.className).not.toContain("bg-blue-500");
+    expect(openAiButton).toBeInTheDocument();
   });
 
   it("locks the official route key and submits the dsh_deepseek shape", async () => {
@@ -200,7 +204,9 @@ describe("DeepSeek Harness provider form (shared shell)", () => {
     expect(
       container.querySelector<HTMLInputElement>('input[name="name"]')?.value,
     ).toBe("Company Gateway");
-    expect(screen.getByLabelText(/Provider Key/)).toHaveValue("company-gateway");
+    expect(screen.getByLabelText(/Provider Key/)).toHaveValue(
+      "company-gateway",
+    );
     expect(screen.getByLabelText(/Provider Key/)).toBeDisabled();
     expect(screen.getByLabelText("Base URL")).toHaveValue(
       "https://company.example/v1",

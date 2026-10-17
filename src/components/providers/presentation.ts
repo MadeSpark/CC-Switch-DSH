@@ -652,6 +652,9 @@ export interface AdditiveInput {
   /** Hermes：model.provider 指向的那家 */
   hermesCurrentId?: string | null;
   isHermesManaged?: (provider: Provider) => boolean;
+  /** DSH：原生配置当前供应商和当前模型 */
+  dshCurrent?: { providerId: string | null; model: string | null } | null;
+  dshModels?: (provider: Provider) => { id: string; name?: string }[];
   /** Pi：读不到当前配置时一律不能改 */
   piStateUnavailable?: boolean;
   actions: {
@@ -758,6 +761,44 @@ export function buildAdditiveSections(input: AdditiveInput): ProviderSection[] {
     let status: CardPresentation["status"];
     let isDefault = false;
     let removeReason: string | undefined = piBlocked;
+
+    if (app === "deepseek-harness") {
+      isDefault = input.dshCurrent?.providerId === p.id;
+      if (isDefault) {
+        status = { label: t("providerCard.status.current"), dot: "muted" };
+        const model = input.dshCurrent?.model?.trim();
+        if (model) {
+          chips.push({
+            key: "dshCurrentModel",
+            label: model,
+            tone: "outline",
+          });
+        }
+        removeReason = t("providerCard.reason.currentCannotRemove");
+      } else {
+        const models = input.dshModels?.(p) ?? [];
+        buttons.push({
+          key: "setDshDefault",
+          label: t("providerCard.action.setDefault"),
+          onClick: () => actions.setDefault(p, models[0]?.id),
+          menu:
+            models.length > 1
+              ? {
+                  title: t("providerCard.action.setDefault"),
+                  options: models.map((model) => ({
+                    key: model.id,
+                    label: model.name?.trim() || model.id,
+                    detail:
+                      model.name?.trim() && model.name.trim() !== model.id
+                        ? model.id
+                        : undefined,
+                    onSelect: () => actions.setDefault(p, model.id),
+                  })),
+                }
+              : undefined,
+        });
+      }
+    }
 
     if (app === "openclaw") {
       isDefault = input.openclawDefault?.providerId === p.id;

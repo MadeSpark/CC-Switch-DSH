@@ -47,6 +47,7 @@ import { cn } from "@/lib/utils";
 import { isTextEditableTarget } from "@/utils/domUtils";
 import { extractProviderBaseUrl } from "@/utils/providerConfigUtils";
 import { usePiCurrentState } from "@/lib/query/pi";
+import { useDshCurrentState } from "@/lib/query/dsh";
 import { isHermesReadOnlyProvider } from "@/config/hermesProviderPresets";
 import {
   buildAdditiveSections,
@@ -147,6 +148,8 @@ export function ProviderList({
     isError: isPiCurrentStateError,
     error: piCurrentStateError,
   } = usePiCurrentState(appId === "pi");
+  const { data: dshCurrentState, isPending: isDshCurrentStatePending } =
+    useDshCurrentState(appId === "deepseek-harness");
   const isPiStateReady = appId !== "pi" || isPiCurrentStateSuccess;
   // 累加式应用要等 live 里有哪些供应商读回来（成功或失败）才知道卡片该进哪个分区；
   // 在那之前按加载中画骨架，不然卡片先全落进「可添加」，读回来再整体搬到「已添加」。
@@ -155,7 +158,8 @@ export function ProviderList({
     (appId === "opencode" && isOpencodeLiveIdsPending) ||
     (appId === "openclaw" && isOpenclawLiveIdsPending) ||
     (appId === "hermes" && isHermesLiveIdsPending) ||
-    (appId === "pi" && isPiCurrentStatePending);
+    (appId === "pi" && isPiCurrentStatePending) ||
+    (appId === "deepseek-harness" && isDshCurrentStatePending);
 
   const isInConfig = useCallback(
     (provider: Provider): boolean => {
@@ -173,6 +177,8 @@ export function ProviderList({
             ? (piCurrentState?.enabledProviderIds.includes(provider.id) ??
                 false)
             : false;
+        case "deepseek-harness":
+          return dshCurrentState?.providerIds.includes(provider.id) ?? false;
         default:
           return true;
       }
@@ -184,6 +190,7 @@ export function ProviderList({
       hermesLiveIds,
       isPiStateReady,
       piCurrentState,
+      dshCurrentState,
     ],
   );
 
@@ -348,6 +355,34 @@ export function ProviderList({
           .map((model) => ({ id: model.id, name: model.name }));
       },
       hermesCurrentId: hermesModelConfig?.provider ?? null,
+      dshCurrent:
+        appId === "deepseek-harness" && dshCurrentState
+          ? {
+              providerId: dshCurrentState.currentProviderId,
+              model: dshCurrentState.currentModel,
+            }
+          : null,
+      dshModels: (provider) => {
+        if (appId !== "deepseek-harness") return [];
+        const models = (provider.settingsConfig as Record<string, unknown>)
+          ?.models;
+        if (!Array.isArray(models)) return [];
+        return models
+          .map((model) => {
+            if (typeof model === "string") return { id: model };
+            if (!model || typeof model !== "object") return null;
+            const record = model as Record<string, unknown>;
+            const id = typeof record.id === "string" ? record.id.trim() : "";
+            if (!id) return null;
+            return {
+              id,
+              name: typeof record.name === "string" ? record.name : undefined,
+            };
+          })
+          .filter(
+            (model): model is { id: string; name?: string } => model !== null,
+          );
+      },
       isHermesManaged: (provider) =>
         isHermesReadOnlyProvider(provider.settingsConfig),
       piStateUnavailable: appId === "pi" && !isPiStateReady,
@@ -377,6 +412,7 @@ export function ProviderList({
     currentOmoId,
     currentOmoSlimId,
     hermesModelConfig?.provider,
+    dshCurrentState,
     isPiStateReady,
     onRemoveFromConfig,
     onDelete,
@@ -439,6 +475,9 @@ export function ProviderList({
     if (provider.category === "omo-slim")
       return provider.id === currentOmoSlimId;
     if (appId === "hermes") return provider.id === hermesModelConfig?.provider;
+    if (appId === "deepseek-harness") {
+      return provider.id === dshCurrentState?.currentProviderId;
+    }
     return provider.id === currentProviderId;
   };
 
