@@ -11,7 +11,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { AppPageHeader } from "@/components/shell/AppPageHeader";
-import { AppGlyph, APP_DISPLAY_NAME } from "@/components/shell/AppGlyph";
+import { AppGlyph } from "@/components/shell/AppGlyph";
 import { HelpTip } from "@/components/ui/help-tip";
 import { PageTabs } from "@/components/ui/page-tabs";
 import { Button } from "@/components/ui/button";
@@ -65,6 +65,7 @@ import {
 } from "./rememberedChoice";
 import { fmtInt, formatRelativeTime, getLocaleFromLanguage } from "./format";
 import { getUsageProviderLabel, usageProviderTitle } from "./providerLabel";
+import { APP_TYPE_BRAND, appTypeDisplayName } from "./appBrand";
 
 // 用量页打开时扫描会话日志的间隔；旧版存过的「关」(0) 等无效值回落到默认
 const DEFAULT_REFRESH_INTERVAL_MS = 60000;
@@ -551,11 +552,11 @@ export function UsageDashboard({
         </button>
         {/* 应用只露图标，名字放悬停提示和 aria-label */}
         {KNOWN_APP_TYPES.map((app) => (
-          <HoverTip key={app} content={APP_DISPLAY_NAME[app]}>
+          <HoverTip key={app} content={appTypeDisplayName(app)}>
             <button
               type="button"
               aria-pressed={appType === app}
-              aria-label={APP_DISPLAY_NAME[app]}
+              aria-label={appTypeDisplayName(app)}
               className={cn(
                 chipClass(appType === app),
                 "w-[30px] justify-center px-0",
@@ -563,7 +564,7 @@ export function UsageDashboard({
               onClick={() => changeAppType(app)}
             >
               <AppGlyph
-                app={app}
+                app={APP_TYPE_BRAND[app]}
                 size={16}
                 badgeClassName={appType === app ? "bg-surface" : "bg-subtle"}
               />

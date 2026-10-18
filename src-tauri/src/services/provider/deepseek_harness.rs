@@ -239,6 +239,21 @@ fn sync_native_locked(
             .and_then(|meta| meta.dsh_current_model.clone());
         provider.name = provider_name;
         provider.settings_config = route.config.clone();
+        // 接管期间 DSH 里存的是本机中转地址，不能让它回流进数据库：否则取消接管后数据库
+        // 里留着一个死端口，用户下次编辑又会把它写回 DSH。
+        let native_base_url = route.config.get("baseURL").and_then(Value::as_str);
+        if native_base_url.is_some_and(crate::services::dsh_relay::is_relay_url) {
+            let original = previous_config
+                .get("baseURL")
+                .and_then(Value::as_str)
+                .filter(|value| !crate::services::dsh_relay::is_relay_url(value))
+                .map(ToOwned::to_owned)
+                .or_else(|| crate::services::dsh_relay::recorded_original(id));
+            if let (Some(original), Value::Object(map)) = (original, &mut provider.settings_config)
+            {
+                map.insert("baseURL".to_string(), Value::String(original));
+            }
+        }
         let meta = provider.meta.get_or_insert_with(ProviderMeta::default);
         meta.provider_type = Some(
             match route.source {
@@ -288,6 +303,22 @@ pub(super) fn remove_from_live(state: &AppState, id: &str) -> Result<(), AppErro
 }
 
 fn write_native_provider(provider: &Provider) -> Result<(), AppError> {
+    // 接管期间用户改供应商地址：真正写进 DSH 的必须是本机中转地址，用户填的那个由
+    // `dsh_relay` 记进账本、退出或关掉开关时再换回去。
+    let mut settings = provider.settings_config.clone();
+    let desired_base_url = settings
+        .get("baseURL")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if let Some(relay_base_url) = crate::services::dsh_relay::redirect_base_url(
+        &provider.id,
+        &provider.name,
+        desired_base_url,
+    ) {
+        if let Value::Object(map) = &mut settings {
+            map.insert("baseURL".to_string(), Value::String(relay_base_url));
+        }
+    }
     if provider.id == crate::deepseek_harness_config::OFFICIAL_PROVIDER_ID
         || provider
             .meta
@@ -297,11 +328,11 @@ fn write_native_provider(provider: &Provider) -> Result<(), AppError> {
     {
         let config = serde_json::from_value::<
             crate::deepseek_harness_config::DeepSeekHarnessProviderConfig,
-        >(provider.settings_config.clone())
+        >(settings)
         .map_err(|error| AppError::Config(format!("Invalid DSH provider: {error}")))?;
         crate::deepseek_harness_config::set_provider(&provider.id, &config)
     } else {
-        crate::deepseek_harness_config::set_pi_ai_provider(&provider.id, &provider.settings_config)
+        crate::deepseek_harness_config::set_pi_ai_provider(&provider.id, &settings)
     }
 }
 
@@ -368,9 +399,38 @@ mod tests {
             let dir = tempfile::tempdir().unwrap();
             let previous = std::env::var_os("DSH_HOME");
             std::env::set_var("DSH_HOME", dir.path());
+            std::env::set_var("DSH_PROFILE", "desktop");
+            // The live surface is the loader patch layer: a top-level array of
+            // `- id / name / config` entries applied after every bundle layer.
+            let profile = dir.path().join("profiles/desktop");
+            std::fs::create_dir_all(&profile).unwrap();
             std::fs::write(
-                dir.path().join("settings.yaml"),
-                "llm-deepseek:\n  baseURL: https://api.deepseek.com\n  apiKeyEnv: DEEPSEEK_API_KEY\n  models:\n    - id: deepseek-v4-pro\nllm-pi-ai:\n  providers:\n    company:\n      displayName: Company\n      api: openai-completions\n      baseURL: https://gateway.example/v1\n      apiKeyEnv: COMPANY_API_KEY\n      models:\n        - id: glm-5.3\nagent-default-model:\n  provider: company\n  model: glm-5.3\n",
+                profile.join("cordis.patch.yml"),
+                "\
+- id: llm-deepseek
+  name: '@deepseek-ai/dsh-llm-deepseek'
+  config:
+    baseURL: https://api.deepseek.com
+    apiKeyEnv: DEEPSEEK_API_KEY
+    models:
+      - id: deepseek-v4-pro
+- id: llm-pi-ai
+  name: '@deepseek-ai/dsh-llm-pi-ai'
+  config:
+    providers:
+      company:
+        displayName: Company
+        api: openai-completions
+        baseURL: https://gateway.example/v1
+        apiKeyEnv: COMPANY_API_KEY
+        models:
+          - id: glm-5.3
+- id: agent-default-model
+  name: '@deepseek-ai/dsh-agent-default-model'
+  config:
+    provider: company
+    model: glm-5.3
+",
             )
             .unwrap();
             std::fs::write(
@@ -382,6 +442,19 @@ mod tests {
                 _dir: dir,
                 previous,
             }
+        }
+
+        /// 当前活动的 loader patch 层文件（DSH 的 live 配置真身）。
+        fn patch(&self) -> std::path::PathBuf {
+            self._dir.path().join("profiles/desktop/cordis.patch.yml")
+        }
+
+        fn read(&self) -> String {
+            std::fs::read_to_string(self.patch()).unwrap()
+        }
+
+        fn seed(&self, text: &str) {
+            std::fs::write(self.patch(), text).unwrap();
         }
     }
 
@@ -426,6 +499,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn sync_uses_custom_display_name_for_provider_name() {
         let state = state();
         let native = crate::deepseek_harness_config::NativeState {
@@ -511,8 +585,8 @@ mod tests {
     fn set_current_model_validates_membership_and_updates_state() {
         let home = DshHome::new();
         std::fs::write(
-            home._dir.path().join("settings.yaml"),
-            "llm-pi-ai:\n  providers:\n    k3:\n      baseURL: https://k3.example.com\n      models:\n        - id: k3\n        - id: k3-turbo\n",
+            home.patch(),
+            "- id: llm-pi-ai\n  name: '@deepseek-ai/dsh-llm-pi-ai'\n  config:\n    providers:\n      k3:\n        displayName: K3\n        baseURL: https://k3.example.com\n        models:\n          - id: k3\n          - id: k3-turbo\n",
         )
         .unwrap();
         let state = state();
@@ -557,7 +631,7 @@ mod tests {
 
         remove_from_live(&state, "k3").unwrap();
 
-        let settings = std::fs::read_to_string(home._dir.path().join("settings.yaml")).unwrap();
+        let settings = home.read();
         assert!(settings.contains("llm-deepseek"));
         assert!(settings.contains("company"));
         assert!(!settings.contains("k3"));
@@ -572,7 +646,7 @@ mod tests {
 
         remove_from_live(&state, crate::deepseek_harness_config::OFFICIAL_PROVIDER_ID).unwrap();
 
-        let settings = std::fs::read_to_string(home._dir.path().join("settings.yaml")).unwrap();
+        let settings = home.read();
         assert!(!settings.contains("llm-deepseek"));
         assert!(settings.contains("llm-pi-ai"));
         assert!(settings.contains("company"));
@@ -588,11 +662,9 @@ mod tests {
         let state = state();
         import_from_live(&state).unwrap();
         // Make both pi-ai routes share one credential ref.
-        std::fs::write(
-            home._dir.path().join("settings.yaml"),
-            "llm-pi-ai:\n  providers:\n    route-a:\n      displayName: A\n      baseURL: https://a.example/v1\n      apiKeyEnv: COMPANY_API_KEY\n      models:\n        - id: m-a\n    route-b:\n      displayName: B\n      baseURL: https://b.example/v1\n      apiKeyEnv: COMPANY_API_KEY\n      models:\n        - id: m-b\n",
-        )
-        .unwrap();
+        home.seed(
+            "- id: llm-pi-ai\n  name: '@deepseek-ai/dsh-llm-pi-ai'\n  config:\n    providers:\n      route-a:\n        displayName: A\n        baseURL: https://a.example/v1\n        apiKeyEnv: COMPANY_API_KEY\n        models:\n          - id: m-a\n      route-b:\n        displayName: B\n        baseURL: https://b.example/v1\n        apiKeyEnv: COMPANY_API_KEY\n        models:\n          - id: m-b\n",
+        );
         import_from_live(&state).unwrap();
 
         delete(&state, "route-a").unwrap();
@@ -619,11 +691,9 @@ mod tests {
         let state = state();
         import_from_live(&state).unwrap();
         // The custom route shares DEEPSEEK_API_KEY with the official route.
-        std::fs::write(
-            home._dir.path().join("settings.yaml"),
-            "llm-deepseek:\n  baseURL: https://api.deepseek.com\n  apiKeyEnv: DEEPSEEK_API_KEY\n  models:\n    - id: deepseek-v4-pro\nllm-pi-ai:\n  providers:\n    company:\n      displayName: Company\n      baseURL: https://gateway.example/v1\n      apiKeyEnv: DEEPSEEK_API_KEY\n      models:\n        - id: glm-5.3\n",
-        )
-        .unwrap();
+        home.seed(
+            "- id: llm-deepseek\n  name: '@deepseek-ai/dsh-llm-deepseek'\n  config:\n    baseURL: https://api.deepseek.com\n    apiKeyEnv: DEEPSEEK_API_KEY\n    models:\n      - id: deepseek-v4-pro\n- id: llm-pi-ai\n  name: '@deepseek-ai/dsh-llm-pi-ai'\n  config:\n    providers:\n      company:\n        displayName: Company\n        baseURL: https://gateway.example/v1\n        apiKeyEnv: DEEPSEEK_API_KEY\n        models:\n          - id: glm-5.3\n",
+        );
         import_from_live(&state).unwrap();
 
         remove_from_live(&state, crate::deepseek_harness_config::OFFICIAL_PROVIDER_ID).unwrap();
@@ -660,8 +730,7 @@ mod tests {
             ..Default::default()
         });
         add(&state, copy, false).unwrap();
-        let settings_before =
-            std::fs::read_to_string(home._dir.path().join("settings.yaml")).unwrap();
+        let settings_before = home.read();
 
         let mut edited = state
             .db
@@ -671,8 +740,7 @@ mod tests {
         edited.name = "Renamed Copy".to_string();
         update(&state, None, edited).unwrap();
 
-        let settings_after =
-            std::fs::read_to_string(home._dir.path().join("settings.yaml")).unwrap();
+        let settings_after = home.read();
         assert_eq!(
             settings_before, settings_after,
             "editing a DB-only provider must not touch the native file"
@@ -692,7 +760,7 @@ mod tests {
 
         delete(&state, "company").unwrap();
 
-        let settings = std::fs::read_to_string(home._dir.path().join("settings.yaml")).unwrap();
+        let settings = home.read();
         assert!(!settings.contains("agent-default-model"));
         let native = crate::deepseek_harness_config::read_native_state().unwrap();
         assert!(native.current_provider.is_none());
@@ -709,7 +777,7 @@ mod tests {
 
         remove_from_live(&state, "company").unwrap();
 
-        let settings = std::fs::read_to_string(home._dir.path().join("settings.yaml")).unwrap();
+        let settings = home.read();
         assert!(!settings.contains("company"));
         assert!(!settings.contains("agent-default-model"));
     }
@@ -792,7 +860,7 @@ mod tests {
         let home = DshHome::new();
         let state = state();
         import_from_live(&state).unwrap();
-        let before = std::fs::read_to_string(home._dir.path().join("settings.yaml")).unwrap();
+        let before = home.read();
 
         let mut provider = Provider::with_id(
             "official-copy".to_string(),
@@ -812,7 +880,7 @@ mod tests {
 
         assert!(add(&state, provider, true).is_err());
 
-        let after = std::fs::read_to_string(home._dir.path().join("settings.yaml")).unwrap();
+        let after = home.read();
         assert_eq!(before, after);
         assert!(state
             .db
@@ -859,11 +927,9 @@ mod tests {
     #[serial]
     fn enable_supports_string_form_model_catalogs_and_skips_blank_ids() {
         let home = DshHome::new();
-        std::fs::write(
-            home._dir.path().join("settings.yaml"),
-            "llm-pi-ai:\n  providers:\n    strings:\n      baseURL: https://s.example\n      models:\n        - \"\"\n        - str-model\n",
-        )
-        .unwrap();
+        home.seed(
+            "- id: llm-pi-ai\n  name: '@deepseek-ai/dsh-llm-pi-ai'\n  config:\n    providers:\n      strings:\n        displayName: Strings\n        baseURL: https://s.example\n        models:\n          - \"\"\n          - str-model\n",
+        );
         let state = state();
         import_from_live(&state).unwrap();
 
@@ -872,5 +938,110 @@ mod tests {
         let native = crate::deepseek_harness_config::read_native_state().unwrap();
         assert_eq!(native.current_provider.as_deref(), Some("strings"));
         assert_eq!(native.current_model.as_deref(), Some("str-model"));
+    }
+
+    /// 隔离开 `dsh_relay_state.json` 所在的配置目录（`CC_SWITCH_TEST_HOME`）。
+    struct ConfigHome {
+        _dir: tempfile::TempDir,
+        previous: Option<std::ffi::OsString>,
+    }
+
+    impl ConfigHome {
+        fn new() -> Self {
+            let dir = tempfile::tempdir().unwrap();
+            let previous = std::env::var_os("CC_SWITCH_TEST_HOME");
+            std::env::set_var("CC_SWITCH_TEST_HOME", dir.path());
+            Self {
+                _dir: dir,
+                previous,
+            }
+        }
+    }
+
+    impl Drop for ConfigHome {
+        fn drop(&mut self) {
+            match self.previous.take() {
+                Some(value) => std::env::set_var("CC_SWITCH_TEST_HOME", value),
+                None => std::env::remove_var("CC_SWITCH_TEST_HOME"),
+            }
+        }
+    }
+
+    /// 回归：接管期间编辑供应商，DSH 里必须继续走中转地址，原始地址只记进账本。
+    ///
+    /// 否则用户一保存，DSH 就直连了——CC Switch 退出后能不能用的问题倒是没了，
+    /// 但「退出前走中转」这个前提也没了。
+    #[test]
+    #[serial]
+    fn update_while_relay_attached_keeps_dsh_on_the_relay_url() {
+        let home = DshHome::new();
+        let _config = ConfigHome::new();
+        let state = state();
+        import_from_live(&state).unwrap();
+
+        let relay_base_url = "http://127.0.0.1:15721/dsh/deepseek-official";
+        let ledger = crate::services::dsh_relay::state_path();
+        std::fs::create_dir_all(ledger.parent().unwrap()).unwrap();
+        std::fs::write(
+            &ledger,
+            json!({
+                "attached": true,
+                "baseUrl": "http://127.0.0.1:15721",
+                "providers": [{
+                    "providerId": crate::deepseek_harness_config::OFFICIAL_PROVIDER_ID,
+                    "name": "DeepSeek",
+                    "originalBaseUrl": "https://api.deepseek.com",
+                    "relayBaseUrl": relay_base_url,
+                    "relayed": true
+                }]
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let mut provider = state
+            .db
+            .get_provider_by_id(crate::deepseek_harness_config::OFFICIAL_PROVIDER_ID, APP)
+            .unwrap()
+            .unwrap();
+        provider.settings_config["baseURL"] = json!("https://api.deepseek.com/anthropic");
+
+        update(&state, None, provider).unwrap();
+
+        // 原生配置仍指向中转地址
+        let patch = home.read();
+        assert!(
+            patch.contains(relay_base_url),
+            "DSH 应该继续走中转地址: {patch}"
+        );
+        assert!(
+            !patch.contains("api.deepseek.com/anthropic"),
+            "用户填的地址不应该写进 DSH: {patch}"
+        );
+
+        // 账本记下的是用户填的原始地址
+        let snapshot = crate::services::dsh_relay::read_snapshot();
+        let entry = snapshot
+            .providers
+            .iter()
+            .find(|entry| entry.provider_id == crate::deepseek_harness_config::OFFICIAL_PROVIDER_ID)
+            .expect("账本里应该有这个供应商");
+        assert_eq!(
+            entry.original_base_url.as_deref(),
+            Some("https://api.deepseek.com/anthropic")
+        );
+        assert_eq!(entry.relay_base_url.as_deref(), Some(relay_base_url));
+
+        // 反过来同步原生配置时，中转地址也不能回流进数据库
+        import_from_live(&state).unwrap();
+        let saved = state
+            .db
+            .get_provider_by_id(crate::deepseek_harness_config::OFFICIAL_PROVIDER_ID, APP)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            saved.settings_config["baseURL"],
+            json!("https://api.deepseek.com/anthropic")
+        );
     }
 }

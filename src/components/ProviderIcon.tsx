@@ -76,8 +76,19 @@ export const ProviderIcon: React.FC<ProviderIconProps> = ({
     return undefined;
   }, [color, icon]);
 
+  // 纯装饰用法（AppGlyph 等不传 name 的场景）把图标自带的 <title> 去掉：
+  // 否则每个图标都会往 DOM 里塞一个「DeepSeek」这样的文本节点，与按钮的
+  // aria-label / 旁边的文字重复，读屏和按文本查询都会撞成两个同名元素。
+  const svgMarkup = useMemo(
+    () =>
+      name
+        ? iconSvg
+        : (iconSvg?.replace(/<title>[\s\S]*?<\/title>/gi, "") ?? null),
+    [iconSvg, name],
+  );
+
   // 内联 SVG 渲染（支持 CSS currentColor 着色）
-  if (iconSvg) {
+  if (svgMarkup) {
     return (
       <span
         className={cn(
@@ -86,7 +97,7 @@ export const ProviderIcon: React.FC<ProviderIconProps> = ({
         )}
         title={name}
         style={{ ...sizeStyle, color: effectiveColor }}
-        dangerouslySetInnerHTML={{ __html: iconSvg }}
+        dangerouslySetInnerHTML={{ __html: svgMarkup }}
       />
     );
   }

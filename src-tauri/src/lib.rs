@@ -13,6 +13,7 @@ mod config;
 mod database;
 mod deeplink;
 mod deepseek_harness_config;
+mod deepseek_harness_patch;
 mod error;
 mod gemini_config;
 mod gemini_mcp;
@@ -1183,6 +1184,14 @@ pub fn run() {
                 app_state.db.clone(),
                 app.handle().clone(),
             );
+            // DSH 接管自检：上次退出没来得及换回原始地址（崩溃、强杀）时在这里补上；
+            // 开关还开着就按本次实际监听的端口重新接管。放启动末尾，等端口先定下来。
+            {
+                let proxy_service = app_state.proxy_service.clone();
+                tauri::async_runtime::spawn(async move {
+                    crate::services::dsh_relay::heal_on_startup(&proxy_service).await;
+                });
+            }
             // 将同一个实例注入到全局状态，避免重复创建导致的不一致
             app.manage(app_state);
 
@@ -1722,6 +1731,10 @@ pub fn run() {
             commands::import_deepseek_harness_providers_from_live,
             commands::get_dsh_current_state,
             commands::set_dsh_current_model,
+            // DSH 中转（退出后自动切回原地址）
+            commands::dsh_relay_status,
+            commands::dsh_set_relay,
+            commands::dsh_set_restore_on_exit,
             commands::get_opencode_live_provider_ids,
             // OpenClaw specific
             commands::import_openclaw_providers_from_live,
@@ -1921,7 +1934,23 @@ pub fn run() {
 pub async fn cleanup_before_exit(app_handle: &tauri::AppHandle) {
     if let Some(state) = app_handle.try_state::<store::AppState>() {
         crate::mode::controller::detach_all(state.inner()).await;
+        restore_dsh_relay_on_exit();
         log::info!("退出清理完成：客户端已指回直连，代理已停止");
+    }
+}
+
+/// 退出时把 DSH 各供应商的 baseURL 换回原始地址。
+///
+/// 中转地址只在 CC Switch 活着时有效，所以要在这里恢复；万一恢复失败（文件被占用等）
+/// 只记日志，下次启动自检还会再试一次。
+fn restore_dsh_relay_on_exit() {
+    let (_, restore_on_exit) = crate::settings::get_dsh_relay_flags();
+    if !restore_on_exit || !crate::services::dsh_relay::is_attached() {
+        return;
+    }
+    match crate::services::dsh_relay::detach() {
+        Ok(_) => log::info!("退出清理：DSH 的 baseURL 已换回原始地址"),
+        Err(e) => log::warn!("退出清理：换回 DSH 原始地址失败，留待下次启动自检: {e}"),
     }
 }
 

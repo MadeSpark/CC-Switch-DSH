@@ -10,6 +10,13 @@ This is a standalone CC Switch development project for first-class DeepSeek Harn
 
 See [DSH Native Architecture](docs/architecture/dsh-native.md) for ownership boundaries and data flow.
 
+## DeepSeek Harness 集成（个人分支新增）
+
+- **DSH token 消耗统计**：导入 `~/.dsh/sessions/**/session.v4.jsonl.zstd` 中的会话用量，写入统一用量统计，并按文件游标与记录 ID 去重。详见 [DSH token 统计](docs/DSH-TOKEN-USAGE.md)。
+- **DSH 中转与退出还原**：可将 provider 的 `baseURL` 指向 CC Switch 本机 `/dsh/<providerId>/` 路由，并在用户主动退出 CCS 时恢复原始 API 地址。详见 [DSH 中转](docs/DSH-RELAY.md)。
+- **模型预设**：可从 DSH 模型目录一键保存模型预设，也可把当前生成参数保存为通用参数并复用。详见 [DSH 模型预设](docs/DSH-MODEL-PRESETS.md)。
+- **模型级推理等级**：每个模型支持七档 reasoning effort，可使用模型族推荐预设、逐档调整或清除，并写入 DSH 模型配置。操作说明见 [DSH 模型预设](docs/DSH-MODEL-PRESETS.md)。
+
 Focused verification:
 
 ```bash

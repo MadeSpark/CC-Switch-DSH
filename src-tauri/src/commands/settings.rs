@@ -46,6 +46,10 @@ fn merge_settings_for_save(
     // 客户端地址只经 set_proxy_client_host 保存（它还要重写客户端）；全量保存带的是前端
     // 缓存里的旧值，透传会把刚保存的地址冲掉。
     incoming.proxy_client_host = existing.proxy_client_host.clone();
+    // DSH 中转的两个开关只经 dsh_set_relay / dsh_set_restore_on_exit 保存（接管失败要回滚），
+    // 全量保存同样带的是前端缓存里的旧值。
+    incoming.dsh_relay_enabled = existing.dsh_relay_enabled;
+    incoming.dsh_restore_on_exit = existing.dsh_restore_on_exit;
     incoming
 }
 

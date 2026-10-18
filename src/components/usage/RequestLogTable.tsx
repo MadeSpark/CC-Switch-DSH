@@ -84,6 +84,7 @@ export function isKnownAppId(appType: string): appType is AppId {
 }
 
 export function appDisplayName(appType: string): string {
+  if (appType === "dsh") return APP_DISPLAY_NAME["deepseek-harness"];
   return isKnownAppId(appType) ? APP_DISPLAY_NAME[appType] : appType;
 }
 
@@ -106,6 +107,7 @@ const APP_SHORT_NAME: Record<AppId, string> = {
 };
 
 export function appShortName(appType: string): string {
+  if (appType === "dsh") return "DSH";
   return isKnownAppId(appType) ? APP_SHORT_NAME[appType] : appType;
 }
 

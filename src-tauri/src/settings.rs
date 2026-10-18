@@ -574,6 +574,12 @@ pub struct AppSettings {
     pub pi_config_dir: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dsh_config_dir: Option<String>,
+    /// 是否把 DSH 各供应商的 baseURL 接管到本机中转（由命令 `dsh_set_relay` 维护）
+    #[serde(default)]
+    pub dsh_relay_enabled: bool,
+    /// 退出 CC Switch 时是否把 DSH 各供应商的 baseURL 换回原始地址
+    #[serde(default = "default_true")]
+    pub dsh_restore_on_exit: bool,
 
     // ===== 当前供应商 ID（设备级）=====
     /// 当前 Claude 供应商 ID（本地存储，优先于数据库 is_current）
@@ -707,6 +713,8 @@ impl Default for AppSettings {
             hermes_config_dir: None,
             pi_config_dir: None,
             dsh_config_dir: None,
+            dsh_relay_enabled: false,
+            dsh_restore_on_exit: true,
             current_provider_claude: None,
             current_provider_claude_desktop: None,
             current_provider_codex: None,
@@ -1090,6 +1098,23 @@ pub fn update_settings(mut new_settings: AppSettings) -> Result<(), AppError> {
     });
     *guard = new_settings;
     Ok(())
+}
+
+/// DSH 中转的两个开关：`(relay_enabled, restore_on_exit)`。
+pub fn get_dsh_relay_flags() -> (bool, bool) {
+    let settings = get_settings();
+    (settings.dsh_relay_enabled, settings.dsh_restore_on_exit)
+}
+
+/// 只由命令 `dsh_set_relay` 维护：接管成功后才落 true，避免下次启动自检去接管一个
+/// 从没成功过的状态。
+pub fn set_dsh_relay_enabled(enabled: bool) -> Result<(), AppError> {
+    mutate_settings(|settings| settings.dsh_relay_enabled = enabled)
+}
+
+/// 退出 CC Switch 时是否把 DSH 的 baseURL 换回原始地址。
+pub fn set_dsh_restore_on_exit(enabled: bool) -> Result<(), AppError> {
+    mutate_settings(|settings| settings.dsh_restore_on_exit = enabled)
 }
 
 fn mutate_settings<F>(mutator: F) -> Result<(), AppError>

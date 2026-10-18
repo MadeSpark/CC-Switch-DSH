@@ -15,6 +15,7 @@ const SESSION_PROVIDER_APPS: Record<string, AppId> = {
   "Grok Build (Session)": "grokbuild",
   "MiniMax Code (Session)": "mcode",
   "Pi (Session)": "pi",
+  "DeepSeek Harness (Session)": "deepseek-harness",
 };
 
 export interface UsageProviderLabel {

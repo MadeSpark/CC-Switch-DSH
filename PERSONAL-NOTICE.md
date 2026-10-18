@@ -25,6 +25,10 @@
 3. **彻底移除应用自身更新检测**：不再检查/下载/提示 CC Switch 自身的新版本，也没有联网更新接口；版本号仅作展示。CLI 工具（Claude Code、Codex 等）的升级检查等功能保持原样。
 4. **新增“模型预设”功能**：可在设置里为模型 id（支持 `*` 通配）预设上下文窗口、最大输出 tokens、思考等级、温度、额外参数；给某个程序新增模型且模型 id 命中预设时，弹窗询问是否套用（不套用则完全保留手填值）；另提供一份“通用参数”给没有命中任何预设的模型兜底选用（可在设置里开关是否询问）。
 5. **构建与运行环境的本地适配**：离线 Rust 工具链、本地 cargo 缓存与 pnpm shim；DSH 相关 Rust/前端集成细节（详见 [docs/architecture/dsh-native.md](docs/architecture/dsh-native.md)）。
+6. **DSH token 消耗统计**：导入 `~/.dsh/sessions/**/session.v4.jsonl.zstd` 会话日志，将 assistant 用量写入统一统计，并通过记录 ID 与文件游标去重。
+7. **DSH 中转与退出还原**：支持将 DSH provider 的 `baseURL` 指向 CC Switch 本机中转路由，并在用户主动退出 CCS 时恢复原始 API 地址。
+8. **DSH 模型预设**：支持把当前模型目录一键保存为模型预设，以及把当前生成参数保存为通用参数。
+9. **DSH 模型级推理等级**：模型行支持七档 reasoning effort、推荐预设和单行清除，配置写入 `providers.<id>.models[].reasoningEfforts`。
 
 ## 使用限制 / Usage restrictions
 

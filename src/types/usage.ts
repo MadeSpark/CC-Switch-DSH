@@ -220,6 +220,9 @@ export interface UsageRangeSelection {
  * `opencode` and `pi` have no proxy handler; their usage reaches this
  * dashboard through session importers. `openclaw` / `hermes` appear only as
  * managed apps elsewhere.
+ * `dsh` (DeepSeek Harness) is session-importer only as well: its usage is
+ * parsed out of `session.v4.jsonl.zstd` logs, so the string never goes through
+ * a proxy route and differs from the `deepseek-harness` id used elsewhere.
  */
 export type AppType =
   | "claude"
@@ -228,7 +231,8 @@ export type AppType =
   | "grokbuild"
   | "opencode"
   | "pi"
-  | "mcode";
+  | "mcode"
+  | "dsh";
 
 export type AppTypeFilter = "all" | AppType;
 
@@ -240,6 +244,7 @@ export const KNOWN_APP_TYPES: ReadonlyArray<AppType> = [
   "opencode",
   "pi",
   "mcode",
+  "dsh",
 ];
 
 /**

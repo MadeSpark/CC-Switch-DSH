@@ -37,12 +37,18 @@ mod tests {
     fn with_temp_home(test: impl FnOnce(&std::path::Path)) {
         let directory = tempfile::tempdir().unwrap();
         let previous = std::env::var_os("DSH_HOME");
+        let previous_profile = std::env::var_os("DSH_PROFILE");
         std::env::set_var("DSH_HOME", directory.path());
+        std::env::set_var("DSH_PROFILE", "desktop");
         let result =
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| test(directory.path())));
         match previous {
             Some(value) => std::env::set_var("DSH_HOME", value),
             None => std::env::remove_var("DSH_HOME"),
+        }
+        match previous_profile {
+            Some(value) => std::env::set_var("DSH_PROFILE", value),
+            None => std::env::remove_var("DSH_PROFILE"),
         }
         result.unwrap();
     }
@@ -51,9 +57,11 @@ mod tests {
     #[serial]
     fn exposes_native_providers_and_current_selection() {
         with_temp_home(|home| {
+            let patch = home.join("profiles/desktop/cordis.patch.yml");
+            std::fs::create_dir_all(patch.parent().unwrap()).unwrap();
             std::fs::write(
-                home.join("settings.yaml"),
-                "llm-deepseek:\n  baseURL: \"https://api.deepseek.com\"\n  apiKeyEnv: DEEPSEEK_API_KEY\nllm-pi-ai:\n  providers:\n    k3:\n      baseURL: \"https://k3.example.com\"\nagent-default-model:\n  provider: k3\n  model: k3\n",
+                &patch,
+                "- id: llm-deepseek\n  name: '@deepseek-ai/dsh-llm-deepseek'\n  config:\n    baseURL: https://api.deepseek.com\n    apiKeyEnv: DEEPSEEK_API_KEY\n- id: llm-pi-ai\n  name: '@deepseek-ai/dsh-llm-pi-ai'\n  config:\n    providers:\n      k3:\n        baseURL: https://k3.example.com\n- id: agent-default-model\n  name: '@deepseek-ai/dsh-agent-default-model'\n  config:\n    provider: k3\n    model: k3\n",
             )
             .unwrap();
             let state = AppState::new(Arc::new(

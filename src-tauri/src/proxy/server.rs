@@ -9,6 +9,7 @@
 //! a direct (non-proxied) CLI request.
 
 use super::{
+    dsh_relay,
     failover_switch::FailoverSwitchManager,
     handlers,
     log_codes::srv as log_srv,
@@ -419,6 +420,10 @@ impl ProxyServer {
             .route("/gemini/v1beta/*path", any(handlers::handle_gemini))
             // Gemini 的 GA 版本也叫 /v1，给原 SDK 留一条出口
             .route("/gemini/v1/*path", any(handlers::handle_gemini))
+            // DeepSeek Harness 中转：`/dsh/<provider_id>/...` 换成该 provider 的原始地址，
+            // 字节级透传（不解析请求/响应体，保住 DSH 侧的 usage 统计）
+            .route("/dsh/:provider_id", any(dsh_relay::handle_dsh_relay))
+            .route("/dsh/:provider_id/*path", any(dsh_relay::handle_dsh_relay))
             // 提高默认请求体大小限制（避免 413 Payload Too Large）
             .layer(DefaultBodyLimit::max(200 * 1024 * 1024))
             .with_state(self.state.clone())

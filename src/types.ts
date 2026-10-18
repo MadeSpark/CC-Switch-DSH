@@ -480,6 +480,15 @@ export interface Settings {
   // 覆盖 DeepSeek Harness 配置目录（可选）
   dshConfigDir?: string;
 
+  // ===== DeepSeek Harness 本机中转（设备级）=====
+  // 下面两个字段只由后端持久化（settings.json），前端不直接读写：
+  // UI 的开关状态一律取自 dsh_relay_status（见 src/lib/api/dsh.ts），因为真正的
+  // 「已接管」状态取决于 provider 地址有没有被改写，光看这两个布尔值会不一致。
+  // 是否把 DSH 各 provider 的 API 地址改写到 CC Switch 的本机中转（默认 false）
+  dshRelayEnabled?: boolean;
+  // 退出 CC Switch 时是否自动把 DSH 的 API 地址还原为原始直连地址（默认 true）
+  dshRestoreOnExit?: boolean;
+
   // ===== 当前供应商 ID（设备级）=====
   // 当前 Claude 供应商 ID（优先于数据库 is_current）
   currentProviderClaude?: string;

@@ -7,15 +7,19 @@ use yaml_rust::yaml::{Hash as YamlHash, Yaml};
 use yaml_rust::{YamlEmitter, YamlLoader};
 
 use crate::config::{atomic_write_private, get_home_dir};
+use crate::deepseek_harness_patch as patch;
 use crate::error::AppError;
 
 pub const OFFICIAL_PROVIDER_ID: &str = "deepseek-official";
 pub const DEFAULT_PROFILE_NAME: &str = "default";
 pub const DESKTOP_PROFILE_NAME: &str = "desktop";
 const API_KEY_FIELD: &str = "apiKey";
-const SETTINGS_NAMESPACE: &str = "llm-deepseek";
-const PI_AI_NAMESPACE: &str = "llm-pi-ai";
-const DEFAULT_MODEL_NAMESPACE: &str = "agent-default-model";
+const SETTINGS_NAMESPACE: &str = patch::OFFICIAL_ENTRY_ID;
+const PI_AI_NAMESPACE: &str = patch::PI_AI_ENTRY_ID;
+const DEFAULT_MODEL_NAMESPACE: &str = patch::DEFAULT_MODEL_ENTRY_ID;
+const OFFICIAL_ENTRY_NAME: &str = patch::OFFICIAL_ENTRY_NAME;
+const PI_AI_ENTRY_NAME: &str = patch::PI_AI_ENTRY_NAME;
+const DEFAULT_MODEL_ENTRY_NAME: &str = patch::DEFAULT_MODEL_ENTRY_NAME;
 const API_KEY_REF: &str = "DEEPSEEK_API_KEY";
 const PROFILE_PATCH_TEMPLATE: &str = "\
 # Your patch layer for this dsh profile, applied after every bundle layer:
@@ -111,8 +115,47 @@ fn resolve_dsh_home(
         .unwrap_or(default_path)
 }
 
+/// Profile CC Switch manages when a caller does not name one.
+///
+/// The desktop application runs an Electron-managed `desktop` profile and exports
+/// `DSH_PROFILE` to its own child processes; outside that environment we prefer an
+/// existing `desktop` profile over the generic `default` one so that writes land in
+/// the same patch layer the running Harness actually reads.
+pub fn resolve_active_profile() -> String {
+    if let Ok(name) = std::env::var("DSH_PROFILE") {
+        let trimmed = name.trim();
+        if !trimmed.is_empty() && normalize_profile_name(Some(trimmed)).is_ok() {
+            return trimmed.to_string();
+        }
+    }
+    let profiles = get_dsh_home().join("profiles");
+    if profiles.join(DESKTOP_PROFILE_NAME).is_dir() {
+        return DESKTOP_PROFILE_NAME.to_string();
+    }
+    if profiles.join(DEFAULT_PROFILE_NAME).is_dir() {
+        return DEFAULT_PROFILE_NAME.to_string();
+    }
+    DESKTOP_PROFILE_NAME.to_string()
+}
+
+/// Live patch layer (`profiles/<profile>/cordis.patch.yml`) for the active profile.
+///
+/// This is the only configuration surface the Harness re-reads; `$DSH_HOME/settings.yaml`
+/// is imported once at startup and renamed, so writing there was silently discarded.
+pub fn get_patch_path() -> PathBuf {
+    patch_path_for_profile(Some(&resolve_active_profile()))
+}
+
+pub fn patch_path_for_profile(profile: Option<&str>) -> PathBuf {
+    match get_profile_dir(profile) {
+        Ok(dir) => patch::patch_path(&dir),
+        Err(_) => patch::patch_path(&get_dsh_home().join("profiles").join(DEFAULT_PROFILE_NAME)),
+    }
+}
+
+/// Kept for callers that only need "the live DeepSeek Harness config file".
 pub fn get_settings_path() -> PathBuf {
-    get_dsh_home().join("settings.yaml")
+    get_patch_path()
 }
 
 pub fn get_credentials_path() -> PathBuf {
@@ -173,21 +216,24 @@ pub fn set_provider(
     ensure_profile(config.profile.as_deref())?;
 
     {
-        let mut section = YamlHash::new();
+        let mut section = serde_json::Map::new();
         for (key, value) in object {
             if key == API_KEY_FIELD {
                 continue;
             }
-            section.insert(mapping_key(key), yaml_value(value)?);
+            section.insert(key.clone(), value.clone());
         }
         section.insert(
-            mapping_key("apiKeyEnv"),
-            Yaml::String(API_KEY_REF.to_string()),
+            "apiKeyEnv".to_string(),
+            Value::String(API_KEY_REF.to_string()),
         );
-        update_yaml_document(&get_settings_path(), |document| {
-            merge_mapping_value(document, SETTINGS_NAMESPACE, Yaml::Hash(section));
-            Ok(())
-        })?;
+        let path = patch_path_for_profile(config.profile.as_deref());
+        patch::write_entry_config(
+            &path,
+            SETTINGS_NAMESPACE,
+            OFFICIAL_ENTRY_NAME,
+            &Value::Object(section),
+        )?;
     }
 
     update_credential_reference(API_KEY_REF, config.api_key.as_deref())?;
@@ -201,15 +247,8 @@ pub fn set_provider(
 /// DeepSeek Harness has one official provider route, so deletion clears that route rather than
 /// attempting a dictionary removal that the official schema cannot represent.
 pub fn remove_provider() -> Result<(), AppError> {
-    let settings_path = get_settings_path();
-    if settings_path.exists() {
-        update_yaml_document(&settings_path, |document| {
-            if let Yaml::Hash(hash) = document {
-                hash.remove(&mapping_key(SETTINGS_NAMESPACE));
-            }
-            Ok(())
-        })?;
-    }
+    let path = get_patch_path();
+    patch::remove_entry(&path, SETTINGS_NAMESPACE)?;
 
     // Custom routes may legally share DEEPSEEK_API_KEY; keep the credential
     // alive when a surviving route still points at it.
@@ -223,47 +262,36 @@ pub fn remove_provider() -> Result<(), AppError> {
 }
 
 pub fn provider_exists_in_live_config() -> Result<bool, AppError> {
-    let document = parse_yaml_document(&get_settings_path())?;
-    Ok(matches!(document, Yaml::Hash(hash) if hash.contains_key(&mapping_key(SETTINGS_NAMESPACE))))
+    patch::has_entry(&get_patch_path(), SETTINGS_NAMESPACE)
 }
 
 pub fn read_native_state() -> Result<NativeState, AppError> {
-    let settings = parse_yaml_document(&get_settings_path())?;
+    let entries = patch::read_entries(&get_patch_path())?;
     let credentials = read_credential_references()?;
     let mut state = NativeState::default();
-    let Some(root) = settings.as_hash() else {
-        return Ok(state);
-    };
 
-    if let Some(section) = root
-        .get(&mapping_key(SETTINGS_NAMESPACE))
-        .and_then(Yaml::as_hash)
-    {
-        let config = yaml_hash_to_json(section)?;
-        let name = "DeepSeek".to_string();
-        let config = with_resolved_api_key(config, &credentials);
+    if let Some(Value::Object(section)) = entries.get(SETTINGS_NAMESPACE) {
+        let config = with_resolved_api_key(Value::Object(section.clone()), &credentials);
         state.providers.insert(
             OFFICIAL_PROVIDER_ID.to_string(),
             NativeProvider {
-                name,
+                name: "DeepSeek".to_string(),
                 source: NativeProviderSource::DeepSeek,
                 config,
             },
         );
     }
 
-    if let Some(providers) = root
-        .get(&mapping_key(PI_AI_NAMESPACE))
-        .and_then(Yaml::as_hash)
-        .and_then(|section| section.get(&mapping_key("providers")))
-        .and_then(Yaml::as_hash)
+    if let Some(providers) = entries
+        .get(PI_AI_NAMESPACE)
+        .and_then(|config| config.get("providers"))
+        .and_then(Value::as_object)
     {
         for (id, config) in providers {
-            let Some(id) = id.as_str() else { continue };
-            let Some(config_hash) = config.as_hash() else {
+            let Some(config_hash) = config.as_object() else {
                 continue;
             };
-            let config = with_resolved_api_key(yaml_hash_to_json(config_hash)?, &credentials);
+            let config = with_resolved_api_key(Value::Object(config_hash.clone()), &credentials);
             let name = config
                 .get("displayName")
                 .and_then(Value::as_str)
@@ -281,12 +309,18 @@ pub fn read_native_state() -> Result<NativeState, AppError> {
         }
     }
 
-    if let Some(default_model) = root
-        .get(&mapping_key(DEFAULT_MODEL_NAMESPACE))
-        .and_then(Yaml::as_hash)
+    if let Some(default_model) = entries
+        .get(DEFAULT_MODEL_NAMESPACE)
+        .and_then(Value::as_object)
     {
-        state.current_provider = yaml_string(default_model, "provider");
-        state.current_model = yaml_string(default_model, "model");
+        state.current_provider = default_model
+            .get("provider")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned);
+        state.current_model = default_model
+            .get("model")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned);
     }
     Ok(state)
 }
@@ -308,20 +342,31 @@ pub fn set_pi_ai_provider(provider_id: &str, config: &Value) -> Result<(), AppEr
         validate_credential_ref(reference)?;
         update_credential_reference(reference, api_key.as_deref())?;
     }
-    let section = yaml_value(&Value::Object(config))?;
-    update_yaml_document(&get_settings_path(), |document| {
-        let root = ensure_hash(document);
-        let pi_ai = ensure_child_hash(root, PI_AI_NAMESPACE);
-        let providers = ensure_child_hash(pi_ai, "providers");
-        providers.insert(mapping_key(provider_id), section);
-        Ok(())
-    })
+    ensure_profile(Some(&resolve_active_profile()))?;
+    let route_config = Value::Object(config);
+    update_patch_entry_config(
+        &get_patch_path(),
+        PI_AI_NAMESPACE,
+        PI_AI_ENTRY_NAME,
+        move |entry| {
+            let providers = entry
+                .entry("providers".to_string())
+                .or_insert_with(|| Value::Object(serde_json::Map::new()));
+            let providers = providers.as_object_mut().ok_or_else(|| {
+                AppError::Config(format!(
+                    "DeepSeek Harness patch entry {PI_AI_NAMESPACE} has a non-mapping `providers` value"
+                ))
+            })?;
+            providers.insert(provider_id.to_string(), route_config.clone());
+            Ok(())
+        },
+    )
 }
 
 pub fn remove_pi_ai_provider(provider_id: &str) -> Result<(), AppError> {
     validate_route_id(provider_id)?;
-    let settings_path = get_settings_path();
-    if !settings_path.exists() {
+    let path = get_patch_path();
+    if !path.exists() {
         return Ok(());
     }
     let credential_ref = read_native_state()?
@@ -330,13 +375,9 @@ pub fn remove_pi_ai_provider(provider_id: &str) -> Result<(), AppError> {
         .and_then(|provider| provider.config.get("apiKeyEnv"))
         .and_then(Value::as_str)
         .map(ToOwned::to_owned);
-    update_yaml_document(&settings_path, |document| {
-        if let Yaml::Hash(root) = document {
-            if let Some(Yaml::Hash(section)) = root.get_mut(&mapping_key(PI_AI_NAMESPACE)) {
-                if let Some(Yaml::Hash(providers)) = section.get_mut(&mapping_key("providers")) {
-                    providers.remove(&mapping_key(provider_id));
-                }
-            }
+    update_patch_entry_config(&path, PI_AI_NAMESPACE, PI_AI_ENTRY_NAME, |entry| {
+        if let Some(Value::Object(providers)) = entry.get_mut("providers") {
+            providers.remove(provider_id);
         }
         Ok(())
     })?;
@@ -360,16 +401,20 @@ pub fn set_current_model(provider_id: &str, model_id: &str) -> Result<(), AppErr
             "DeepSeek Harness model id cannot be empty".to_string(),
         ));
     }
-    update_yaml_document(&get_settings_path(), |document| {
-        let root = ensure_hash(document);
-        let current = ensure_child_hash(root, DEFAULT_MODEL_NAMESPACE);
-        current.insert(
-            mapping_key("provider"),
-            Yaml::String(provider_id.to_string()),
-        );
-        current.insert(mapping_key("model"), Yaml::String(model_id.to_string()));
-        Ok(())
-    })
+    ensure_profile(Some(&resolve_active_profile()))?;
+    update_patch_entry_config(
+        &get_patch_path(),
+        DEFAULT_MODEL_NAMESPACE,
+        DEFAULT_MODEL_ENTRY_NAME,
+        |entry| {
+            entry.insert(
+                "provider".to_string(),
+                Value::String(provider_id.to_string()),
+            );
+            entry.insert("model".to_string(), Value::String(model_id.to_string()));
+            Ok(())
+        },
+    )
 }
 
 /// Drop `agent-default-model` when it still points at `provider_id`.
@@ -378,27 +423,47 @@ pub fn set_current_model(provider_id: &str, model_id: &str) -> Result<(), AppErr
 /// referenced route is deleted would leave the Harness runtime targeting a
 /// provider that no longer exists. Returns whether the pointer was cleared.
 pub fn clear_current_model_if_provider(provider_id: &str) -> Result<bool, AppError> {
-    let settings_path = get_settings_path();
-    if !settings_path.exists() {
+    let path = get_patch_path();
+    if !path.exists() {
         return Ok(false);
     }
-    let document = parse_yaml_document(&settings_path)?;
-    let points_at_provider = document
-        .as_hash()
-        .and_then(|hash| hash.get(&mapping_key(DEFAULT_MODEL_NAMESPACE)))
-        .and_then(Yaml::as_hash)
-        .and_then(|hash| yaml_string(hash, "provider"))
+    let points_at_provider = patch::read_entry_config(&path, DEFAULT_MODEL_NAMESPACE)?
+        .and_then(|config| {
+            config
+                .get("provider")
+                .and_then(Value::as_str)
+                .map(ToOwned::to_owned)
+        })
         .is_some_and(|provider| provider == provider_id);
     if !points_at_provider {
         return Ok(false);
     }
-    update_yaml_document(&settings_path, |document| {
-        if let Yaml::Hash(hash) = document {
-            hash.remove(&mapping_key(DEFAULT_MODEL_NAMESPACE));
-        }
-        Ok(())
-    })?;
+    patch::remove_entry(&path, DEFAULT_MODEL_NAMESPACE)?;
     Ok(true)
+}
+
+/// Read → mutate → write one patch entry's `config:` mapping.
+///
+/// The Harness rewrites `cordis.patch.yml` itself (its settings UI persists into the
+/// same file), so every write re-reads the current file and only replaces the subtree
+/// CC Switch owns.
+fn update_patch_entry_config(
+    path: &Path,
+    entry_id: &str,
+    entry_name: &str,
+    mutate: impl FnOnce(&mut serde_json::Map<String, Value>) -> Result<(), AppError>,
+) -> Result<(), AppError> {
+    let mut config = match patch::read_entry_config(path, entry_id)? {
+        Some(Value::Object(map)) => map,
+        Some(_) => {
+            return Err(AppError::Config(format!(
+                "DeepSeek Harness patch entry `{entry_id}` must hold a YAML mapping"
+            )))
+        }
+        None => serde_json::Map::new(),
+    };
+    mutate(&mut config)?;
+    patch::write_entry_config(path, entry_id, entry_name, &Value::Object(config))
 }
 
 fn with_resolved_api_key(mut config: Value, credentials: &HashMap<String, String>) -> Value {
@@ -481,52 +546,6 @@ fn ensure_child_hash<'a>(parent: &'a mut YamlHash, key: &str) -> &'a mut YamlHas
         unreachable!("child was normalized")
     };
     hash
-}
-
-fn yaml_hash_to_json(hash: &YamlHash) -> Result<Value, AppError> {
-    let mut object = serde_json::Map::new();
-    for (key, value) in hash {
-        let key = key
-            .as_str()
-            .ok_or_else(|| AppError::Config("DSH YAML keys must be strings".to_string()))?;
-        object.insert(key.to_string(), yaml_to_json(value)?);
-    }
-    Ok(Value::Object(object))
-}
-
-fn yaml_to_json(value: &Yaml) -> Result<Value, AppError> {
-    Ok(match value {
-        Yaml::Null | Yaml::BadValue => Value::Null,
-        Yaml::Boolean(value) => Value::Bool(*value),
-        Yaml::Integer(value) => Value::Number((*value).into()),
-        Yaml::Real(value) => {
-            serde_json::Number::from_f64(value.parse::<f64>().map_err(|error| {
-                AppError::Config(format!("Invalid DSH real number '{value}': {error}"))
-            })?)
-            .map(Value::Number)
-            .ok_or_else(|| AppError::Config(format!("Invalid DSH real number: {value}")))?
-        }
-        Yaml::String(value) => Value::String(value.clone()),
-        Yaml::Array(values) => Value::Array(
-            values
-                .iter()
-                .map(yaml_to_json)
-                .collect::<Result<Vec<_>, _>>()?,
-        ),
-        Yaml::Hash(hash) => yaml_hash_to_json(hash)?,
-        Yaml::Alias(_) => {
-            return Err(AppError::Config(
-                "DSH YAML aliases are not supported".to_string(),
-            ))
-        }
-    })
-}
-
-fn yaml_string(hash: &YamlHash, key: &str) -> Option<String> {
-    hash.get(&mapping_key(key))
-        .and_then(Yaml::as_str)
-        .filter(|value| !value.trim().is_empty())
-        .map(ToOwned::to_owned)
 }
 
 fn validate_route_id(value: &str) -> Result<(), AppError> {
@@ -626,45 +645,6 @@ fn mapping_key(name: &str) -> Yaml {
     Yaml::String(name.to_string())
 }
 
-fn merge_mapping_value(document: &mut Yaml, key: &str, value: Yaml) {
-    if !matches!(document, Yaml::Hash(_)) {
-        *document = Yaml::Hash(YamlHash::new());
-    }
-    if let Yaml::Hash(hash) = document {
-        hash.insert(mapping_key(key), value);
-    }
-}
-
-fn yaml_value(value: &Value) -> Result<Yaml, AppError> {
-    Ok(match value {
-        Value::Null => Yaml::Null,
-        Value::Bool(value) => Yaml::Boolean(*value),
-        Value::Number(value) => {
-            if let Some(number) = value.as_i64() {
-                Yaml::Integer(number)
-            } else if let Some(number) = value.as_f64() {
-                Yaml::Real(number.to_string())
-            } else {
-                return Err(AppError::Config(format!("Unsupported number: {value}")));
-            }
-        }
-        Value::String(value) => Yaml::String(value.clone()),
-        Value::Array(values) => Yaml::Array(
-            values
-                .iter()
-                .map(yaml_value)
-                .collect::<Result<Vec<_>, _>>()?,
-        ),
-        Value::Object(values) => {
-            let mut hash = YamlHash::new();
-            for (name, value) in values {
-                hash.insert(mapping_key(name), yaml_value(value)?);
-            }
-            Yaml::Hash(hash)
-        }
-    })
-}
-
 fn initialize_if_missing(path: &Path, contents: &str) -> Result<(), AppError> {
     if !path.exists() {
         crate::config::write_text_file(path, contents)?;
@@ -677,17 +657,41 @@ mod tests {
     use super::*;
     use serial_test::serial;
 
+    const DESKTOP_PATCH: &str = "profiles/desktop/cordis.patch.yml";
+
     fn with_temp_home(test: impl FnOnce(&Path)) {
         let directory = tempfile::tempdir().unwrap();
-        let previous = std::env::var_os("DSH_HOME");
+        let previous_home = std::env::var_os("DSH_HOME");
+        let previous_profile = std::env::var_os("DSH_PROFILE");
         std::env::set_var("DSH_HOME", directory.path());
+        std::env::set_var("DSH_PROFILE", DESKTOP_PROFILE_NAME);
         let result =
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| test(directory.path())));
-        match previous {
+        match previous_home {
             Some(value) => std::env::set_var("DSH_HOME", value),
             None => std::env::remove_var("DSH_HOME"),
         }
+        match previous_profile {
+            Some(value) => std::env::set_var("DSH_PROFILE", value),
+            None => std::env::remove_var("DSH_PROFILE"),
+        }
         result.unwrap();
+    }
+
+    fn desktop_patch_path(home: &Path) -> PathBuf {
+        home.join(DESKTOP_PATCH)
+    }
+
+    /// Seed the live patch layer the way the Harness stores it (top-level array).
+    fn seed_patch(home: &Path, contents: &str) -> PathBuf {
+        let path = desktop_patch_path(home);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, contents).unwrap();
+        path
+    }
+
+    fn read_patch(home: &Path) -> String {
+        std::fs::read_to_string(desktop_patch_path(home)).unwrap()
     }
 
     #[test]
@@ -725,11 +729,10 @@ mod tests {
     #[serial]
     fn writes_official_settings_credentials_and_desktop_profile() {
         with_temp_home(|home| {
-            std::fs::write(
-                home.join("settings.yaml"),
-                "# preserved\nother-plugin:\n  enabled: true\n",
-            )
-            .unwrap();
+            seed_patch(
+                home,
+                "# preserved\n- id: other-plugin\n  name: other-plugin\n  config:\n    enabled: true\n",
+            );
 
             let config = DeepSeekHarnessProviderConfig {
                 api_key: Some("sk-test".to_string()),
@@ -742,10 +745,12 @@ mod tests {
             };
             set_provider("official", &config).unwrap();
 
-            let settings = std::fs::read_to_string(home.join("settings.yaml")).unwrap();
-            assert!(settings.contains(r#""other-plugin":"#));
-            assert!(settings.contains(r#""llm-deepseek":"#));
-            assert!(settings.contains(r#"baseURL: "https://example.com""#));
+            let settings = read_patch(home);
+            assert!(settings.starts_with("# preserved"));
+            assert!(settings.contains("- id: other-plugin"));
+            assert!(settings.contains("- id: llm-deepseek"));
+            assert!(settings.contains("name: '@deepseek-ai/dsh-llm-deepseek'"));
+            assert!(settings.contains("baseURL: https://example.com"));
             assert!(settings.contains("apiKeyEnv: DEEPSEEK_API_KEY"));
             assert!(!settings.contains("sk-test"));
 
@@ -756,6 +761,8 @@ mod tests {
             assert!(home.join("profiles/desktop/package.json").exists());
             assert!(home.join("profiles/desktop/cordis.patch.yml").exists());
             assert!(home.join("profiles/desktop/pnpm-workspace.yaml").exists());
+            // The dead legacy surface must never be written again.
+            assert!(!home.join("settings.yaml").exists());
         });
     }
 
@@ -814,11 +821,10 @@ mod tests {
     #[serial]
     fn preserves_custom_providers_when_switching_managed_route() {
         with_temp_home(|home| {
-            std::fs::write(
-                home.join("settings.yaml"),
-                "llm-pi-ai:\n  providers:\n    k3:\n      displayName: K3\nother-plugin: keep\n",
-            )
-            .unwrap();
+            seed_patch(
+                home,
+                "- id: llm-pi-ai\n  name: '@deepseek-ai/dsh-llm-pi-ai'\n  config:\n    providers:\n      k3:\n        displayName: K3\n- id: other-plugin\n  name: other-plugin\n  config:\n    enabled: true\n",
+            );
             std::fs::write(home.join(".credentials.yaml"), "K3_API_KEY: keep\n").unwrap();
 
             set_provider(
@@ -831,18 +837,19 @@ mod tests {
             )
             .unwrap();
 
-            let settings = std::fs::read_to_string(home.join("settings.yaml")).unwrap();
-            assert!(settings.contains("llm-pi-ai"));
+            let settings = read_patch(home);
+            assert!(settings.contains("- id: llm-pi-ai"));
             assert!(settings.contains("displayName: K3"));
-            assert!(settings.contains("llm-deepseek"));
+            assert!(settings.contains("- id: llm-deepseek"));
             let credentials = std::fs::read_to_string(home.join(".credentials.yaml")).unwrap();
             assert!(credentials.contains("K3_API_KEY: keep"));
 
             remove_provider().unwrap();
 
-            let settings = std::fs::read_to_string(home.join("settings.yaml")).unwrap();
+            let settings = read_patch(home);
             assert!(!settings.contains("llm-deepseek"));
             assert!(settings.contains("displayName: K3"));
+            assert!(settings.contains("- id: other-plugin"));
         });
     }
 
@@ -862,7 +869,7 @@ mod tests {
                 )
                 .unwrap();
 
-                let settings = std::fs::read_to_string(home.join("settings.yaml")).unwrap();
+                let settings = read_patch(home);
                 assert!(settings.contains("llm-deepseek"));
                 assert!(!settings.contains("baseURL"));
             }
@@ -873,11 +880,10 @@ mod tests {
     #[serial]
     fn removes_managed_configuration_only() {
         with_temp_home(|home| {
-            std::fs::write(
-                home.join("settings.yaml"),
-                "# preserved\nllm-deepseek:\n  baseURL: https://example.com\nother-plugin: keep\n",
-            )
-            .unwrap();
+            seed_patch(
+                home,
+                "# preserved\n- id: llm-deepseek\n  name: '@deepseek-ai/dsh-llm-deepseek'\n  config:\n    baseURL: https://example.com\n- id: other-plugin\n  name: other-plugin\n  config:\n    enabled: true\n",
+            );
             std::fs::write(
                 home.join(".credentials.yaml"),
                 "DEEPSEEK_API_KEY: secret\nOTHER_KEY: keep\n",
@@ -886,9 +892,10 @@ mod tests {
 
             remove_provider().unwrap();
 
-            let settings = std::fs::read_to_string(home.join("settings.yaml")).unwrap();
+            let settings = read_patch(home);
+            assert!(settings.starts_with("# preserved"));
             assert!(!settings.contains("llm-deepseek"));
-            assert!(settings.contains(r#""other-plugin": keep"#));
+            assert!(settings.contains("- id: other-plugin"));
             let credentials = std::fs::read_to_string(home.join(".credentials.yaml")).unwrap();
             assert!(!credentials.contains("DEEPSEEK_API_KEY"));
             assert!(credentials.contains("OTHER_KEY: keep"));
@@ -901,11 +908,10 @@ mod tests {
         with_temp_home(|home| {
             assert!(!provider_exists_in_live_config().unwrap());
 
-            std::fs::write(
-                home.join("settings.yaml"),
-                "llm-deepseek:\n  baseURL: https://example.com\n",
-            )
-            .unwrap();
+            seed_patch(
+                home,
+                "- id: llm-deepseek\n  name: '@deepseek-ai/dsh-llm-deepseek'\n  config:\n    baseURL: https://example.com\n",
+            );
             assert!(provider_exists_in_live_config().unwrap());
 
             remove_provider().unwrap();
@@ -917,11 +923,10 @@ mod tests {
     #[serial]
     fn reads_official_and_pi_ai_native_providers_with_current_model() {
         with_temp_home(|home| {
-            std::fs::write(
-                home.join("settings.yaml"),
-                "llm-deepseek:\n  baseURL: https://api.deepseek.com\n  apiKeyEnv: DEEPSEEK_API_KEY\n  models:\n    - id: deepseek-v4-pro\n      name: DeepSeek V4 Pro\nllm-pi-ai:\n  providers:\n    company-gateway:\n      displayName: Company Gateway\n      api: openai-completions\n      baseURL: https://gateway.example/v1\n      apiKeyEnv: COMPANY_GATEWAY_API_KEY\n      models:\n        - id: example-model-1\n          name: Example Model\nagent-default-model:\n  provider: company-gateway\n  model: example-model-1\n",
-            )
-            .unwrap();
+            seed_patch(
+                home,
+                "- id: llm-deepseek\n  name: '@deepseek-ai/dsh-llm-deepseek'\n  config:\n    baseURL: https://api.deepseek.com\n    apiKeyEnv: DEEPSEEK_API_KEY\n    models:\n      - id: deepseek-v4-pro\n        name: DeepSeek V4 Pro\n- id: llm-pi-ai\n  name: '@deepseek-ai/dsh-llm-pi-ai'\n  config:\n    providers:\n      company-gateway:\n        displayName: Company Gateway\n        api: openai-completions\n        baseURL: https://gateway.example/v1\n        apiKeyEnv: COMPANY_GATEWAY_API_KEY\n        models:\n          - id: example-model-1\n            name: Example Model\n- id: agent-default-model\n  name: '@deepseek-ai/dsh-agent-default-model'\n  config:\n    provider: company-gateway\n    model: example-model-1\n",
+            );
             std::fs::write(
                 home.join(".credentials.yaml"),
                 "version: 1\nrefs:\n  DEEPSEEK_API_KEY: deepseek-secret\n  COMPANY_GATEWAY_API_KEY: gateway-secret\nrecords:\n  client-connection/browser-session:\n    kind: grant\n    payload:\n      version: 1\n      secret: keep\n",
@@ -982,11 +987,10 @@ mod tests {
     #[serial]
     fn writes_and_removes_pi_ai_provider_without_touching_siblings() {
         with_temp_home(|home| {
-            std::fs::write(
-                home.join("settings.yaml"),
-                "llm-pi-ai:\n  providers:\n    sibling:\n      displayName: Keep\nagent-default-model:\n  provider: sibling\n  model: keep-model\n",
-            )
-            .unwrap();
+            seed_patch(
+                home,
+                "- id: llm-pi-ai\n  name: '@deepseek-ai/dsh-llm-pi-ai'\n  config:\n    providers:\n      sibling:\n        displayName: Keep\n- id: agent-default-model\n  name: '@deepseek-ai/dsh-agent-default-model'\n  config:\n    provider: sibling\n    model: keep-model\n",
+            );
             std::fs::write(home.join(".credentials.yaml"), "version: 1\nrefs: {}\n").unwrap();
 
             let config = serde_json::json!({

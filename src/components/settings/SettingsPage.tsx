@@ -17,6 +17,7 @@ import {
   Loader2,
   Route,
   SlidersHorizontal,
+  Waypoints,
 } from "lucide-react";
 import { toast } from "@/lib/toast";
 import { useTranslation } from "react-i18next";
@@ -43,6 +44,7 @@ import { LogConfigPanel } from "@/components/settings/LogConfigPanel";
 import { GeneralSection } from "@/components/settings/sections/GeneralSection";
 import { AppConfigSection } from "@/components/settings/sections/AppConfigSection";
 import { ModelPresetsSection } from "@/components/settings/sections/ModelPresetsSection";
+import { DshSection } from "@/components/settings/sections/DshSection";
 import {
   SettingsBlock,
   SettingsBody,
@@ -62,6 +64,7 @@ const SECTION_ICON: Record<
   appConfig: Folder,
   modelPresets: ListChecks,
   routing: Route,
+  dsh: Waypoints,
   network: Globe,
   data: Database,
   about: Info,
@@ -360,7 +363,11 @@ export function SettingsPage({
     [autoSaveSettings, settings, t, updateSettings],
   );
 
-  const isBusy = useMemo(() => isLoading && !settings, [isLoading, settings]);
+  // DSH 中转不依赖 get_settings：设置读失败时也要把分区渲染出来
+  const isBusy = useMemo(
+    () => isLoading && !settings && section !== "dsh",
+    [isLoading, settings, section],
+  );
   const SectionIcon = SECTION_ICON[section];
 
   const appConfigDirty =
@@ -368,6 +375,8 @@ export function SettingsPage({
     (initialAppConfigDir?.trim() || undefined);
 
   const renderSection = () => {
+    // DSH 中转是独立的后端命令，不依赖 get_settings：设置读失败时也能用
+    if (section === "dsh") return <DshSection />;
     if (!settings) return null;
     switch (section) {
       case "general":
@@ -535,7 +544,11 @@ export function SettingsPage({
     <>
       <AppPageHeader
         icon={<SectionIcon className="h-5 w-5" strokeWidth={1.5} />}
-        title={t(`settings.sections.${section}`)}
+        title={
+          section === "dsh"
+            ? t("dshRelay.sectionTitle")
+            : t(`settings.sections.${section}`)
+        }
       />
       <div
         ref={scrollRef}

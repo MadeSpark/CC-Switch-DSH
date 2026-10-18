@@ -1,9 +1,15 @@
-import { useQuery, type QueryClient } from "@tanstack/react-query";
-import { dshApi } from "@/lib/api/dsh";
+import {
+  useMutation,
+  useQuery,
+  useQueryClient,
+  type QueryClient,
+} from "@tanstack/react-query";
+import { dshApi, type DshRelayStatus } from "@/lib/api/dsh";
 
 export const dshKeys = {
   all: ["dsh"] as const,
   currentState: ["dsh", "currentState"] as const,
+  relayStatus: ["dsh", "relayStatus"] as const,
 };
 
 export const invalidateDshProviderCaches = async (queryClient: QueryClient) => {
@@ -20,5 +26,48 @@ export function useDshCurrentState(enabled = true) {
     queryKey: dshKeys.currentState,
     queryFn: () => dshApi.getCurrentState(),
     enabled,
+  });
+}
+
+/**
+ * DSH 中转状态。命令未就绪（后端还没实现）或读取失败时保持静默：
+ * 不重试、不弹错，由设置页降级成「状态不可用」。
+ * 5s 内不重复读：设置页来回切换分区时不必每次都问后端。
+ */
+export function useDshRelayStatus(enabled = true) {
+  return useQuery({
+    queryKey: dshKeys.relayStatus,
+    queryFn: () => dshApi.getRelayStatus(),
+    enabled,
+    retry: false,
+    refetchOnWindowFocus: false,
+    staleTime: 5_000,
+  });
+}
+
+function applyRelayStatus(
+  queryClient: QueryClient,
+  status: DshRelayStatus,
+): void {
+  queryClient.setQueryData(dshKeys.relayStatus, status);
+  // 两个开关同时写进 settings.json，让设置查询过期以免别处读到旧值
+  void queryClient.invalidateQueries({ queryKey: ["settings"] });
+}
+
+/** 开/关「使用 CC Switch 中转 DSH 请求」。 */
+export function useSetDshRelay() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (enabled: boolean) => dshApi.setRelay(enabled),
+    onSuccess: (status) => applyRelayStatus(queryClient, status),
+  });
+}
+
+/** 开/关「退出 CC Switch 时自动还原直连地址」。 */
+export function useSetDshRestoreOnExit() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (enabled: boolean) => dshApi.setRestoreOnExit(enabled),
+    onSuccess: (status) => applyRelayStatus(queryClient, status),
   });
 }

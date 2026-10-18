@@ -21,6 +21,7 @@ import {
   Server,
   Settings,
   SlidersHorizontal,
+  Waypoints,
 } from "lucide-react";
 import type { AppId } from "@/lib/api";
 import type { VisibleApps } from "@/types";
@@ -678,11 +679,17 @@ function NavItem({
 
 // ─── 设置目录 ──────────────────────────────────────────────────────────────
 
-const SETTINGS_ITEMS: { section: SettingsSection; icon: IconComponent }[] = [
+const SETTINGS_ITEMS: {
+  section: SettingsSection;
+  icon: IconComponent;
+  /** 少数分区的标题不在 settings.sections 下（DSH 用独立的 dshRelay 命名空间） */
+  labelKey?: string;
+}[] = [
   { section: "general", icon: SlidersHorizontal },
   { section: "appConfig", icon: Folder },
   { section: "modelPresets", icon: ListChecks },
   { section: "routing", icon: Route },
+  { section: "dsh", icon: Waypoints, labelKey: "dshRelay.sectionTitle" },
   { section: "network", icon: Globe },
   { section: "data", icon: Database },
   { section: "about", icon: Info },
@@ -731,13 +738,13 @@ function SettingsDirectory({
         aria-label={t("nav.settings")}
         className={cn("flex min-h-0 flex-1 flex-col", collapsed && "mt-2")}
       >
-        {SETTINGS_ITEMS.map(({ section, icon }) => (
+        {SETTINGS_ITEMS.map(({ section, icon, labelKey }) => (
           <NavItem
             key={section}
             collapsed={collapsed}
             selected={settingsSection === section}
             icon={icon}
-            label={t(`settings.sections.${section}`)}
+            label={t(labelKey ?? `settings.sections.${section}`)}
             onClick={() => onSelectSettingsSection(section)}
           />
         ))}
