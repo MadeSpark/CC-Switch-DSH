@@ -1901,6 +1901,10 @@ function ProviderFormFull({
       settingsConfig,
     };
 
+    if (appId === "deepseek-harness" && !dshForm.dshIsOfficial) {
+      payload.name = dshForm.dshDisplayName.trim() || payload.name;
+    }
+
     if (isCodexOfficialProvider) {
       payload.presetCategory = "official";
     }
@@ -3120,6 +3124,12 @@ function ProviderFormFull({
           {appId === "deepseek-harness" && (
             <DeepSeekHarnessFormFields
               isOfficial={dshForm.dshIsOfficial}
+              displayName={dshForm.dshDisplayName}
+              onDisplayNameChange={dshForm.handleDshDisplayNameChange}
+              reasoningEffort={dshForm.dshReasoningEffort}
+              onReasoningEffortChange={dshForm.handleDshReasoningEffortChange}
+              maxTokens={dshForm.dshMaxTokens}
+              onMaxTokensChange={dshForm.handleDshMaxTokensChange}
               apiKey={dshForm.dshApiKey}
               onApiKeyChange={dshForm.handleDshApiKeyChange}
               apiKeyEnv={dshForm.dshApiKeyEnv}
@@ -3235,14 +3245,25 @@ function ProviderFormFull({
                 <JsonEditor
                   value={form.getValues("settingsConfig")}
                   onChange={(config) => form.setValue("settingsConfig", config)}
-                  placeholder={`{
-  "displayName": "Custom DSH",
-  "api": "openai-completions",
-  "baseURL": "https://api.example.com/v1",
-  "apiKeyEnv": "CUSTOM_DSH_API_KEY",
-  "apiKey": "your-api-key-here",
-  "models": []
-}`}
+                  placeholder={JSON.stringify(
+                    {
+                      displayName: dshForm.dshDisplayName,
+                      ...(dshForm.dshReasoningEffort.trim()
+                        ? { reasoningEffort: dshForm.dshReasoningEffort.trim() }
+                        : {}),
+                      ...(dshForm.dshMaxTokens
+                        ? { maxTokens: Number(dshForm.dshMaxTokens) }
+                        : {}),
+                      api: dshForm.dshApi,
+                      baseURL: dshForm.dshBaseUrl,
+                      apiKeyEnv: dshForm.dshApiKeyEnv,
+                      models: dshForm.dshModels.map(
+                        ({ rowKey: _rowKey, ...model }) => model,
+                      ),
+                    },
+                    null,
+                    2,
+                  )}
                   rows={3}
                   showValidation={true}
                   language="json"

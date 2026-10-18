@@ -1,8 +1,12 @@
 <div align="center">
 
-# CC Switch DSH Native
+# CC Switch DSH Native（个人自用修改版）
 
-This is a standalone CC Switch development project for first-class DeepSeek Harness integration. It tracks upstream CC Switch while adding native DSH provider synchronization and a Codex-style provider experience.
+> **⚠️ 完全自用声明：本仓库是 MadeSpark 的个人自用修改版，不是官方发行版，不面向公众分发、不提供技术支持。**
+> 代码来源：上游 [farion1231/cc-switch](https://github.com/farion1231/cc-switch)（MIT，作者 Jason Young）`main@73f37c4`（v4.0.14），并合并了上游 PR **#7356**（DeepSeek Harness 原生集成，作者 [yang227](https://github.com/yang227)）；本仓库 [MadeSpark/CC-Switch-DSH](https://github.com/MadeSpark/CC-Switch-DSH) 仅在此之上叠加个人改动。
+> 详细来源、差异清单与使用限制见 **[PERSONAL-NOTICE.md](PERSONAL-NOTICE.md)**。
+
+This is a standalone CC Switch development project for first-class DeepSeek Harness integration. It tracks upstream CC Switch while adding native DSH provider synchronization and a Codex-style provider experience. It is a **personal-use-only fork** — see [PERSONAL-NOTICE.md](PERSONAL-NOTICE.md) for provenance and usage restrictions.
 
 See [DSH Native Architecture](docs/architecture/dsh-native.md) for ownership boundaries and data flow.
 

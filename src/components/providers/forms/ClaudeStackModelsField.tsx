@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -7,6 +8,9 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { FormLabel } from "@/components/ui/form";
 import { ImeSafeInput } from "@/components/ui/ime-safe-input";
 import { Input } from "@/components/ui/input";
+import { toast } from "@/lib/toast";
+import { useModelPresetPrompt } from "@/hooks/useModelPresetPrompt";
+import type { ModelPresetParams } from "@/lib/modelPresets";
 import type { FetchedModel } from "@/lib/api/model-fetch";
 import type { ClaudeStackModel } from "@/types";
 import {
@@ -23,6 +27,9 @@ import {
 export type ClaudeStackModelRow = ClaudeStackModel & { rowId: string };
 
 let nextRowId = 0;
+
+/** 只有窗口达到 100 万才勾得上 Stack 行的「1M」标记，更小的窗口这行表达不了。 */
+const CLAUDE_ONE_M_CONTEXT = 1_000_000;
 
 export function createClaudeStackModelRow(
   seed?: Partial<ClaudeStackModel>,
@@ -116,6 +123,72 @@ export function ClaudeStackModelsField({
 }: ClaudeStackModelsFieldProps) {
   const { t } = useTranslation();
 
+  // 模型预设（需求 5）：模型 id 落定后询问是否套用预设参数。Stack 行能表达的只有「1M
+  // 上下文」这一项（窗口 ≥ 100 万时勾上 1M 标记），其余参数列进「已跳过」提示，不猜着写。
+  const { offerPresetForModel, dialog: presetPromptDialog } =
+    useModelPresetPrompt();
+  const rowsRef = useRef(rows);
+  useEffect(() => {
+    rowsRef.current = rows;
+  }, [rows]);
+  // 同一行同一个模型 id 只问一次：输入框失焦 / 回车会反复提交同一个 id。
+  const offeredPresetRef = useRef(new Map<string, string>());
+
+  const applyPresetToRow = (rowId: string, params: ModelPresetParams) => {
+    const currentRows = rowsRef.current;
+    const current = currentRows.find((row) => row.rowId === rowId);
+    if (!current) return;
+
+    const patch: Partial<ClaudeStackModel> = {};
+    const ignored: string[] = [];
+    if (params.contextWindow !== undefined) {
+      if (params.contextWindow >= CLAUDE_ONE_M_CONTEXT) {
+        patch.oneM = true;
+        patch.model = stripClaudeOneMMarker(current.model);
+      } else {
+        ignored.push(t("modelPresets.paramLabels.contextWindow"));
+      }
+    }
+    if (params.maxOutputTokens !== undefined) {
+      ignored.push(t("modelPresets.paramLabels.maxOutputTokens"));
+    }
+    if (params.reasoningEffort !== undefined) {
+      ignored.push(t("modelPresets.paramLabels.reasoningEffort"));
+    }
+    if (params.temperature !== undefined) {
+      ignored.push(t("modelPresets.paramLabels.temperature"));
+    }
+    if (params.extraParams !== undefined) {
+      ignored.push(t("modelPresets.paramLabels.extraParams"));
+    }
+
+    if (Object.keys(patch).length > 0) {
+      onRowsChange(
+        currentRows.map((row) =>
+          row.rowId === rowId ? { ...row, ...patch } : row,
+        ),
+      );
+    }
+
+    if (ignored.length > 0) {
+      toast.warning(
+        t("modelPresets.prompt.skipped", { params: ignored.join(", ") }),
+      );
+    } else {
+      toast.success(t("modelPresets.prompt.updated"));
+    }
+  };
+
+  const offerPresetForRow = (rowId: string, modelId: string) => {
+    const trimmed = stripClaudeOneMMarker(modelId).trim();
+    if (!trimmed) return;
+    if (offeredPresetRef.current.get(rowId) === trimmed) return;
+    const offered = offerPresetForModel(trimmed, (params) =>
+      applyPresetToRow(rowId, params),
+    );
+    if (offered) offeredPresetRef.current.set(rowId, trimmed);
+  };
+
   const updateRow = (rowId: string, patch: Partial<ClaudeStackModel>) =>
     onRowsChange(
       rows.map((row) => (row.rowId === rowId ? { ...row, ...patch } : row)),
@@ -133,6 +206,10 @@ export function ClaudeStackModelsField({
       .filter((id) => !configured.has(id))
       .map((id) => createClaudeStackModelRow({ model: id }));
     onRowsChange([...kept, ...additions]);
+    // 一次只加了一个模型时才问预设：批量勾选时逐个弹询问框太吵。
+    if (additions.length === 1) {
+      offerPresetForRow(additions[0].rowId, additions[0].model);
+    }
   };
 
   return (
@@ -235,6 +312,12 @@ export function ClaudeStackModelsField({
                     onChange={(event) =>
                       updateRow(row.rowId, { model: event.target.value })
                     }
+                    onBlur={() => offerPresetForRow(row.rowId, row.model)}
+                    onKeyDown={(event) => {
+                      if (event.key !== "Enter") return;
+                      event.preventDefault();
+                      offerPresetForRow(row.rowId, row.model);
+                    }}
                     placeholder={t("providerForm.stackModelPlaceholder", {
                       defaultValue: "例如 deepseek-v4-pro",
                     })}
@@ -247,7 +330,10 @@ export function ClaudeStackModelsField({
                   {fetchedModels.length > 0 && (
                     <ModelDropdown
                       models={fetchedModels}
-                      onSelect={(id) => updateRow(row.rowId, { model: id })}
+                      onSelect={(id) => {
+                        updateRow(row.rowId, { model: id });
+                        offerPresetForRow(row.rowId, id);
+                      }}
                     />
                   )}
                 </div>
@@ -286,6 +372,7 @@ export function ClaudeStackModelsField({
           })}
         </div>
       )}
+      {presetPromptDialog}
     </div>
   );
 }

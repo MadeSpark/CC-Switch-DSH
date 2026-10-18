@@ -199,9 +199,23 @@ fn sync_native_locked(
     let saved = state.db.get_all_providers(APP)?;
     let mut changed = 0;
     for (id, route) in &native.providers {
+        let provider_name = match route.source {
+            crate::deepseek_harness_config::NativeProviderSource::DeepSeek => route.name.clone(),
+            crate::deepseek_harness_config::NativeProviderSource::PiAi => route
+                .config
+                .get("displayName")
+                .and_then(Value::as_str)
+                .filter(|name| !name.trim().is_empty())
+                .unwrap_or(route.name.as_str())
+                .to_string(),
+        };
         let mut provider = saved.get(id).cloned().unwrap_or_else(|| {
-            let mut provider =
-                Provider::with_id(id.clone(), route.name.clone(), route.config.clone(), None);
+            let mut provider = Provider::with_id(
+                id.clone(),
+                provider_name.clone(),
+                route.config.clone(),
+                None,
+            );
             provider.category = Some(
                 if route.source == crate::deepseek_harness_config::NativeProviderSource::DeepSeek {
                     "official"
@@ -223,7 +237,7 @@ fn sync_native_locked(
             .meta
             .as_ref()
             .and_then(|meta| meta.dsh_current_model.clone());
-        provider.name = route.name.clone();
+        provider.name = provider_name;
         provider.settings_config = route.config.clone();
         let meta = provider.meta.get_or_insert_with(ProviderMeta::default);
         meta.provider_type = Some(
@@ -412,12 +426,41 @@ mod tests {
     }
 
     #[test]
+    fn sync_uses_custom_display_name_for_provider_name() {
+        let state = state();
+        let native = crate::deepseek_harness_config::NativeState {
+            providers: indexmap::indexmap! {
+                "custom".to_string() => crate::deepseek_harness_config::NativeProvider {
+                    name: "stale route name".to_string(),
+                    source: crate::deepseek_harness_config::NativeProviderSource::PiAi,
+                    config: json!({
+                        "displayName": "Editable route name",
+                        "models": [{"id": "model-a"}]
+                    }),
+                },
+            },
+            ..Default::default()
+        };
+
+        assert_eq!(sync_native_locked(&state, &native).unwrap(), 1);
+        let provider = state
+            .db
+            .get_provider_by_id("custom", APP)
+            .unwrap()
+            .expect("custom route imported");
+        assert_eq!(provider.name, "Editable route name");
+        assert_eq!(
+            provider.settings_config["displayName"],
+            "Editable route name"
+        );
+    }
+
+    #[test]
     #[serial]
     fn switching_provider_updates_native_default_model() {
         let _home = DshHome::new();
         let state = state();
         import_from_live(&state).unwrap();
-
         enable(&state, crate::deepseek_harness_config::OFFICIAL_PROVIDER_ID).unwrap();
         let native = crate::deepseek_harness_config::read_native_state().unwrap();
         assert_eq!(

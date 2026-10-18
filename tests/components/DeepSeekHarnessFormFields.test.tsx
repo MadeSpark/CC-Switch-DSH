@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ComponentProps, PropsWithChildren } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { describe, expect, it, vi } from "vitest";
 import { DeepSeekHarnessFormFields } from "@/components/providers/forms/DeepSeekHarnessFormFields";
@@ -19,12 +20,25 @@ type DshFieldsProps = ComponentProps<typeof DeepSeekHarnessFormFields>;
 
 const FormShell = ({ children }: PropsWithChildren) => {
   const form = useForm();
-  return <Form {...form}>{children}</Form>;
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  return (
+    <QueryClientProvider client={queryClient}>
+      <Form {...form}>{children}</Form>
+    </QueryClientProvider>
+  );
 };
 
 const renderFields = (overrides: Partial<DshFieldsProps> = {}) => {
   const props: DshFieldsProps = {
     isOfficial: false,
+    displayName: "Custom DSH",
+    onDisplayNameChange: vi.fn(),
+    reasoningEffort: "",
+    onReasoningEffortChange: vi.fn(),
+    maxTokens: "",
+    onMaxTokensChange: vi.fn(),
     apiKey: "sk-test",
     onApiKeyChange: vi.fn(),
     apiKeyEnv: "CUSTOM_DSH_API_KEY",
@@ -54,6 +68,31 @@ const renderFields = (overrides: Partial<DshFieldsProps> = {}) => {
 };
 
 describe("DeepSeekHarnessFormFields", () => {
+  it("updates display name and generation options", () => {
+    const onDisplayNameChange = vi.fn();
+    const onReasoningEffortChange = vi.fn();
+    const onMaxTokensChange = vi.fn();
+    renderFields({
+      onDisplayNameChange,
+      onReasoningEffortChange,
+      onMaxTokensChange,
+    });
+
+    fireEvent.change(screen.getByLabelText("deepseekHarness.displayName"), {
+      target: { value: "Company Gateway" },
+    });
+    fireEvent.change(screen.getByLabelText("deepseekHarness.reasoningEffort"), {
+      target: { value: "high" },
+    });
+    fireEvent.change(screen.getByLabelText("deepseekHarness.maxTokens"), {
+      target: { value: "64000" },
+    });
+
+    expect(onDisplayNameChange).toHaveBeenCalledWith("Company Gateway");
+    expect(onReasoningEffortChange).toHaveBeenCalledWith("high");
+    expect(onMaxTokensChange).toHaveBeenCalledWith("64000");
+  });
+
   it("shows credential ref and API format for custom providers", () => {
     renderFields();
 
@@ -161,7 +200,7 @@ describe("DeepSeekHarnessFormFields", () => {
     ).toBeInTheDocument();
   });
 
-  it("fetches models and fills the row from the inline dropdown", async () => {
+  it("fetches models, opens the picker, and writes selected rows", async () => {
     Element.prototype.scrollIntoView = vi.fn();
     vi.mocked(fetchModelsForConfig).mockResolvedValue([
       { id: "gpt-4o", ownedBy: "openai" },
@@ -169,7 +208,9 @@ describe("DeepSeekHarnessFormFields", () => {
     const onModelsChange = vi.fn();
     renderFields({ onModelsChange });
 
-    fireEvent.click(screen.getByRole("button", { name: "Fetch Models" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "providerForm.fetchModels" }),
+    );
 
     await waitFor(() =>
       expect(fetchModelsForConfig).toHaveBeenCalledWith(
@@ -178,27 +219,32 @@ describe("DeepSeekHarnessFormFields", () => {
       ),
     );
 
+    const checkbox = await screen.findByRole("checkbox", { name: "gpt-4o" });
+    fireEvent.click(checkbox);
     fireEvent.click(
-      await screen.findByRole("button", { name: "Select model" }),
+      screen.getByRole("button", { name: "providerForm.modelPicker.apply" }),
     );
-    fireEvent.click(await screen.findByRole("option", { name: "gpt-4o" }));
 
-    expect(onModelsChange).toHaveBeenCalledWith([
-      { id: "gpt-4o", name: "DeepSeek V4 Pro" },
+    const nextModels = onModelsChange.mock.calls.at(-1)?.[0];
+    expect(nextModels).toEqual([
+      expect.objectContaining({ id: "deepseek-v4-pro" }),
+      expect.objectContaining({ id: "gpt-4o", name: "gpt-4o" }),
     ]);
   });
 
-  it("does not show the fetched-model dropdown until a row exists", async () => {
+  it("opens the fetched-model picker when the catalog is empty", async () => {
     vi.mocked(fetchModelsForConfig).mockResolvedValue([
       { id: "gpt-4o", ownedBy: "openai" },
     ]);
     renderFields({ models: [] });
 
-    fireEvent.click(screen.getByRole("button", { name: "Fetch Models" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "providerForm.fetchModels" }),
+    );
 
     await waitFor(() => expect(fetchModelsForConfig).toHaveBeenCalledTimes(1));
     expect(
-      screen.queryByRole("button", { name: "Select model" }),
-    ).not.toBeInTheDocument();
+      await screen.findByRole("checkbox", { name: "gpt-4o" }),
+    ).toBeInTheDocument();
   });
 });

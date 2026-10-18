@@ -46,6 +46,7 @@ import {
   Download,
   Loader2,
   Plus,
+  Sparkles,
   Trash2,
 } from "lucide-react";
 import EndpointSpeedTest from "./EndpointSpeedTest";
@@ -81,6 +82,13 @@ import { LocalProxyRequestOverridesField } from "./LocalProxyRequestOverridesFie
 import { cn } from "@/lib/utils";
 import { useCommittableRef } from "@/hooks/useLatestRef";
 import { useModelMetadataFill } from "@/hooks/useModelMetadataFill";
+import { useModelPresetPrompt } from "@/hooks/useModelPresetPrompt";
+import { useModelPresets } from "@/hooks/useModelPresets";
+import {
+  hasPresetParams,
+  pickPresetParams,
+  type ModelPresetParams,
+} from "@/lib/modelPresets";
 import { codexPresetModelSources } from "@/config/presetModelMetadata";
 import {
   fillCodexCatalogModel,
@@ -608,6 +616,17 @@ export function CodexFormFields({
 }: CodexFormFieldsProps) {
   const { t } = useTranslation();
 
+  // 模型预设（需求 5）：添加 / 提交模型 id 后询问是否套用预设参数。数据来自
+  // `get_model_presets`，和设置页共用同一份缓存；点「套用」后由下面的
+  // applyPresetToCatalogRow 写进这一行的目录字段。
+  const {
+    offerPresetForModel,
+    dialog: presetPromptDialog,
+    isPending: isPresetPromptPending,
+  } = useModelPresetPrompt();
+  const { generic: genericPresetParams } = useModelPresets();
+  const hasGenericPresetParams = hasPresetParams(genericPresetParams);
+
   const [fetchedModels, setFetchedModels] = useState<FetchedModel[]>([]);
   const [isFetchingModels, setIsFetchingModels] = useState(false);
   // 拉取请求序号：请求身份（Base URL / 完整地址开关 / API Key / 自定义 UA /
@@ -973,6 +992,138 @@ export function CodexFormFields({
     [catalogRowsRef, commitCatalogRows, fillModelMetadata],
   );
 
+  // ---- 模型预设（需求 5）：把预设参数写进模型列表的某一行 ----
+  // 目录行能表达的只有上下文窗口和思考等级：窗口直接写；思考等级只认 CODEX_REASONING_LEVELS
+  // 里的规范值（后端会丢掉未知值），并同时补进这一行可选的档位（默认档位下拉只在档位非空时
+  // 渲染）。最大输出只有 Anthropic 格式的供应商级字段，温度 / 额外参数没有对应字段——这些
+  // 参数一律列进「已跳过」提示，不猜着写。
+  const applyPresetToCatalogRow = useCallback(
+    (rowId: string, params: ModelPresetParams) => {
+      const rows = catalogRowsRef.current;
+      const current = rows.find((row) => row.rowId === rowId);
+      if (!current) return;
+
+      const patch: Partial<CodexCatalogModel> = {};
+      const ignored: string[] = [];
+
+      if (params.contextWindow !== undefined) {
+        patch.contextWindow = String(params.contextWindow);
+      }
+
+      if (params.reasoningEffort !== undefined) {
+        const level = params.reasoningEffort.trim().toLowerCase();
+        if ((CODEX_REASONING_LEVELS as readonly string[]).includes(level)) {
+          patch.defaultReasoningLevel = level;
+          patch.reasoningLevels = CODEX_REASONING_LEVELS.filter(
+            (item) =>
+              item === level || (current.reasoningLevels ?? []).includes(item),
+          );
+        } else {
+          ignored.push(t("modelPresets.paramLabels.reasoningEffort"));
+        }
+      }
+
+      if (params.maxOutputTokens !== undefined) {
+        if (isAnthropicFormat && onMaxOutputTokensChange) {
+          onMaxOutputTokensChange(String(params.maxOutputTokens));
+        } else {
+          ignored.push(t("modelPresets.paramLabels.maxOutputTokens"));
+        }
+      }
+
+      if (params.temperature !== undefined) {
+        ignored.push(t("modelPresets.paramLabels.temperature"));
+      }
+      if (params.extraParams !== undefined) {
+        ignored.push(t("modelPresets.paramLabels.extraParams"));
+      }
+
+      if (Object.keys(patch).length > 0) {
+        commitCatalogRows(
+          rows.map((row) => (row.rowId === rowId ? { ...row, ...patch } : row)),
+        );
+      }
+
+      if (ignored.length > 0) {
+        toast.warning(
+          t("modelPresets.prompt.skipped", { params: ignored.join(", ") }),
+        );
+      } else {
+        toast.success(t("modelPresets.prompt.updated"));
+      }
+    },
+    [
+      catalogRowsRef,
+      commitCatalogRows,
+      isAnthropicFormat,
+      onMaxOutputTokensChange,
+      t,
+    ],
+  );
+
+  // 同一行同一个模型 id 只问一次：输入框失焦 / 回车会反复提交同一个 id。
+  const offeredPresetRef = useRef(new Map<string, string>());
+  // 一次操作新增多行时排队逐个问，避免后一个询问框直接盖掉前一个。
+  const presetQueueRef = useRef<{ rowId: string; modelId: string }[]>([]);
+  const drainPresetQueue: () => void = useCallback(() => {
+    const next = presetQueueRef.current.shift();
+    if (!next) return;
+    const offered = offerPresetForModel(next.modelId, (params) => {
+      applyPresetToCatalogRow(next.rowId, params);
+      drainPresetQueue();
+    });
+    if (offered) {
+      offeredPresetRef.current.set(next.rowId, next.modelId);
+      return;
+    }
+    drainPresetQueue();
+  }, [applyPresetToCatalogRow, offerPresetForModel]);
+
+  const enqueuePresetOffer = useCallback(
+    (rowId: string, modelId: string) => {
+      const trimmed = modelId.trim();
+      if (!trimmed) return;
+      if (offeredPresetRef.current.get(rowId) === trimmed) return;
+      if (
+        presetQueueRef.current.some(
+          (item) => item.rowId === rowId && item.modelId === trimmed,
+        )
+      ) {
+        return;
+      }
+      presetQueueRef.current.push({ rowId, modelId: trimmed });
+      drainPresetQueue();
+    },
+    [drainPresetQueue],
+  );
+
+  // 手动输入模型名后提交（失焦 / 回车）才询问，不跟着每次按键弹。
+  const handleCommitCatalogModel = useCallback(
+    (rowId: string) => {
+      const row = catalogRowsRef.current.find((item) => item.rowId === rowId);
+      if (!row) return;
+      const modelId = row.model.trim();
+      if (!modelId) return;
+      fillCatalogRowMetadata(rowId, modelId);
+      enqueuePresetOffer(rowId, modelId);
+    },
+    [catalogRowsRef, enqueuePresetOffer, fillCatalogRowMetadata],
+  );
+
+  // 一次新增多行时排队逐个问；用户点「跳过」不会走 onApply，这里在弹窗关掉后继续问下一个，
+  // 否则剩下的行要等下一次操作才轮到。
+  const wasPresetPromptPendingRef = useRef(false);
+  useEffect(() => {
+    if (
+      wasPresetPromptPendingRef.current &&
+      !isPresetPromptPending &&
+      presetQueueRef.current.length > 0
+    ) {
+      drainPresetQueue();
+    }
+    wasPresetPromptPendingRef.current = isPresetPromptPending;
+  }, [drainPresetQueue, isPresetPromptPending]);
+
   // 第一行就是 `model`（加载时已挪到最前面）：它不在列表里时没有这样的行；没填时保存会用
   // 第一行。
   const trimmedDefaultModel = codexModel.trim();
@@ -1002,6 +1153,22 @@ export function CodexFormFields({
     [firstRowIsDefault, trimmedDefaultModel],
   );
 
+  // 「套用通用参数」：通用参数没有模型匹配，直接写进默认模型那一行（没有默认行时写第一行）。
+  const handleApplyGenericPreset = useCallback(() => {
+    const rows = catalogRowsRef.current;
+    const target = linkedDefaultIndex >= 0 ? rows[linkedDefaultIndex] : rows[0];
+    if (!target) return;
+    applyPresetToCatalogRow(
+      target.rowId,
+      pickPresetParams(genericPresetParams),
+    );
+  }, [
+    applyPresetToCatalogRow,
+    catalogRowsRef,
+    genericPresetParams,
+    linkedDefaultIndex,
+  ]);
+
   const handleAddCatalogRow = useCallback(() => {
     if (!onCatalogModelsChange) return;
     const rows = catalogRowsRef.current;
@@ -1011,11 +1178,15 @@ export function CodexFormFields({
         : [createCatalogRow()];
     commitCatalogRows([...rows, ...added]);
     for (const row of added) {
-      if (row.model) fillCatalogRowMetadata(row.rowId, row.model);
+      if (row.model) {
+        fillCatalogRowMetadata(row.rowId, row.model);
+        enqueuePresetOffer(row.rowId, row.model);
+      }
     }
   }, [
     catalogRowsRef,
     commitCatalogRows,
+    enqueuePresetOffer,
     fillCatalogRowMetadata,
     onCatalogModelsChange,
     seedWithDefaultModel,
@@ -1053,10 +1224,12 @@ export function CodexFormFields({
         ),
       );
       fillCatalogRowMetadata(rowId, modelId);
+      enqueuePresetOffer(rowId, modelId);
     },
     [
       catalogRowsRef,
       commitCatalogRows,
+      enqueuePresetOffer,
       fillCatalogRowMetadata,
       linkedDefaultIndex,
       onModelChange,
@@ -1101,10 +1274,15 @@ export function CodexFormFields({
       for (const row of additions) {
         fillCatalogRowMetadata(row.rowId, row.model, true);
       }
+      // 一次只加了一个模型时才问预设：批量勾选时逐个弹询问框太吵。
+      if (additions.length === 1) {
+        enqueuePresetOffer(additions[0].rowId, additions[0].model);
+      }
     },
     [
       catalogRowsRef,
       commitCatalogRows,
+      enqueuePresetOffer,
       fillCatalogRowMetadata,
       linkedDefaultIndex,
       onModelChange,
@@ -1152,9 +1330,11 @@ export function CodexFormFields({
     const rows = catalogRowsRef.current;
     commitCatalogRows(firstRowIsDefault ? [row, ...rows] : [...rows, row]);
     fillCatalogRowMetadata(row.rowId, trimmedDefaultModel);
+    enqueuePresetOffer(row.rowId, trimmedDefaultModel);
   }, [
     catalogRowsRef,
     commitCatalogRows,
+    enqueuePresetOffer,
     fillCatalogRowMetadata,
     firstRowIsDefault,
     onCatalogModelsChange,
@@ -1220,10 +1400,14 @@ export function CodexFormFields({
       }),
     );
     commitCatalogRows([...rows, ...added]);
-    for (const row of added) fillCatalogRowMetadata(row.rowId, row.model);
+    for (const row of added) {
+      fillCatalogRowMetadata(row.rowId, row.model);
+      enqueuePresetOffer(row.rowId, row.model);
+    }
   }, [
     catalogRowsRef,
     commitCatalogRows,
+    enqueuePresetOffer,
     fillCatalogRowMetadata,
     onCatalogModelsChange,
     trimmedDefaultModel,
@@ -1253,6 +1437,19 @@ export function CodexFormFields({
         <Plus className="h-3.5 w-3.5" />
         {addLabel}
       </Button>
+      {hasGenericPresetParams && catalogRows.length > 0 && (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={handleApplyGenericPreset}
+          title={t("modelPresets.genericHint")}
+          className="h-7 gap-1"
+        >
+          <Sparkles className="h-3.5 w-3.5" />
+          {t("modelPresets.prompt.applyGeneric")}
+        </Button>
+      )}
     </div>
   );
 
@@ -1617,6 +1814,12 @@ export function CodexFormFields({
                   model: event.target.value,
                 })
               }
+              onBlur={() => handleCommitCatalogModel(row.rowId)}
+              onKeyDown={(event) => {
+                if (event.key !== "Enter") return;
+                event.preventDefault();
+                handleCommitCatalogModel(row.rowId);
+              }}
               placeholder={t("codexConfig.catalogModelPlaceholder", {
                 defaultValue: "例如: deepseek-v4-flash",
               })}
@@ -2055,6 +2258,7 @@ export function CodexFormFields({
         )}
 
         {speedTestModal}
+        {presetPromptDialog}
       </>
     );
   }
@@ -2301,6 +2505,7 @@ export function CodexFormFields({
       )}
 
       {speedTestModal}
+      {presetPromptDialog}
     </>
   );
 }

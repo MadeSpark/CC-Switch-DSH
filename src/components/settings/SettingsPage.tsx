@@ -13,6 +13,7 @@ import {
   FolderOpen,
   Globe,
   Info,
+  ListChecks,
   Loader2,
   Route,
   SlidersHorizontal,
@@ -41,6 +42,7 @@ import { GlobalProxySettings } from "@/components/settings/GlobalProxySettings";
 import { LogConfigPanel } from "@/components/settings/LogConfigPanel";
 import { GeneralSection } from "@/components/settings/sections/GeneralSection";
 import { AppConfigSection } from "@/components/settings/sections/AppConfigSection";
+import { ModelPresetsSection } from "@/components/settings/sections/ModelPresetsSection";
 import {
   SettingsBlock,
   SettingsBody,
@@ -58,6 +60,7 @@ const SECTION_ICON: Record<
 > = {
   general: SlidersHorizontal,
   appConfig: Folder,
+  modelPresets: ListChecks,
   routing: Route,
   network: Globe,
   data: Database,
@@ -521,6 +524,8 @@ export function SettingsPage({
             </SettingsBlock>
           </>
         );
+      case "modelPresets":
+        return <ModelPresetsSection />;
       case "about":
         return <AboutSection isPortable={isPortable} />;
     }

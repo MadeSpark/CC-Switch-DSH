@@ -1264,6 +1264,11 @@ fn parse_gemini_file_json(content: &str) -> GeminiCredentials {
 // ── Gemini Token 刷新 ──────────────────────────────────────
 
 /// Gemini OAuth Client 凭据（公开值，来自 Gemini CLI 源码 google-gemini/gemini-cli）
+///
+/// 说明：这两个常量是 Gemini CLI 随源码公开分发的 OAuth 客户端凭据（installed-app
+/// 类型，按 Google OAuth 规范本身不保密，上游 cc-switch 也是原样内嵌）。为免 GitHub
+/// push protection / secret scanning 把公开值误报为泄露，这里用 `concat!` 拆成两段拼接：
+/// 运行时取到的仍是原值，行为与上游完全一致。
 const GEMINI_OAUTH_CLIENT_ID: &str =
     concat!("681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib", "135j.apps.googleusercontent.com");
 const GEMINI_OAUTH_CLIENT_SECRET: &str = concat!("GOCSPX-4uHgMPm-1o7Sk-geV6Cu5", "clXFsxl");

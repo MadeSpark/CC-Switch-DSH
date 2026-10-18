@@ -930,18 +930,11 @@
     "browsePlaceholderDsh": "例如：/home/<你的用户名>/.dsh",
     "browseDirectory": "浏览目录",
     "resetDefault": "恢复默认目录（需保存后生效）",
-    "checkForUpdates": "检查更新",
-    "updateTo": "更新到 v{{version}}",
     "updating": "更新中...",
     "checking": "检查中...",
     "upToDate": "已是最新",
     "aboutHint": "查看版本信息与更新状态。",
     "portableMode": "当前为便携版，更新需手动下载。",
-    "portableUpdateHint": "便携版：点击上方按钮会下载新版压缩包，解压后覆盖原来的 cc-switch.exe 即可。配置和数据保存在用户目录下的 .cc-switch，不会因覆盖而丢失。",
-    "updateAvailable": "检测到新版本：{{version}}",
-    "updateBadge": "有更新可用",
-    "updateFailed": "更新安装失败，已尝试打开下载页面。",
-    "checkUpdateFailed": "检查更新失败，请稍后重试。",
     "openReleaseNotesFailed": "打开更新日志失败",
     "releaseNotes": "更新日志",
     "viewReleaseNotes": "查看该版本更新日志",
@@ -1061,7 +1054,8 @@
       "routing": "本地路由",
       "network": "网络",
       "data": "数据",
-      "about": "关于"
+      "about": "关于",
+      "modelPresets": "模型预设"
     },
     "appConfig": {
       "configDir": "配置目录"
@@ -1282,7 +1276,13 @@
     "noModels": "暂无模型，点击“添加”新增。",
     "defaultModel": "默认模型",
     "defaultModelHint": "DSH 默认使用的模型。",
-    "defaultModelBackgroundHint": "该供应商不是 DSH 当前使用的路由，默认模型修改不会生效。"
+    "defaultModelBackgroundHint": "该供应商不是 DSH 当前使用的路由，默认模型修改不会生效。",
+    "displayName": "显示名称",
+    "displayNameHint": "侧栏与供应商卡片上显示的名字",
+    "reasoningEffort": "思考等级",
+    "reasoningEffortHint": "写入 DSH 配置的 reasoningEffort（留空则不写）",
+    "maxTokens": "最大输出 Tokens",
+    "maxTokensHint": "写入 DSH 配置的 maxTokens（留空则不写）"
   },
   "appSwitcher": {
     "more": "更多应用"
@@ -2667,17 +2667,9 @@
   },
   "dbUpgrade": {
     "title": "数据库版本过新",
-    "description": "当前数据库由更新版本的 CC Switch 创建，需要升级应用后才能继续使用。升级不会删除你的数据。",
+    "description": "当前数据库由更新版本的 CC Switch 创建，需要手动下载较新版本并替换应用后才能继续使用（本版本不联网检查更新，也不会自动升级）。升级不会删除你的数据。",
     "versionInfo": "数据库版本 v{{db}} · 应用支持 v{{supported}}",
     "dbPath": "数据库文件",
-    "checking": "正在检查可用更新…",
-    "updateAvailable": "发现新版本 v{{version}}，升级后即可继续使用。",
-    "incompatibleTitle": "升级也无法解决",
-    "incompatibleDescription": "你已是最新版本，但数据库版本（v{{db}}）仍高于本应用支持的版本（v{{supported}}）。该数据库可能由第三方客户端或更高版本创建，升级当前官方应用也无法兼容。",
-    "preparing": "正在准备更新…",
-    "downloading": "正在下载更新…",
-    "upgradeNow": "升级应用",
-    "retry": "重试升级",
     "openReleases": "打开发布页",
     "openConfigDir": "打开配置目录",
     "quit": "退出"
@@ -4170,7 +4162,6 @@
     "appsTitle": "应用：安装、升级、在侧栏显示哪些",
     "appsHasUpdate": "应用 · 有可用更新",
     "settings": "设置",
-    "settingsHasUpdate": "设置 · CC Switch 有新版本",
     "mode": {
       "route": "路由",
       "stack": "聚合"
@@ -4906,6 +4897,57 @@
       "loading": "正在查询额度…",
       "refresh": "刷新额度",
       "refreshAria": "刷新 {{login}} 的额度"
+    }
+  },
+  "modelPresets": {
+    "title": "模型预设",
+    "description": "为模型 id 预设上下文窗口、思考等级等参数，新增模型命中时可直接套用。",
+    "addPreset": "新增预设",
+    "editPreset": "编辑预设",
+    "deletePreset": "删除预设",
+    "empty": "还没有模型预设",
+    "emptyHint": "新增预设后，给程序添加模型时会自动询问是否套用。",
+    "fields": {
+      "modelId": "匹配的模型 id",
+      "modelIdHint": "支持 * 通配，例如 deepseek-v4-*；精确匹配优先。",
+      "name": "预设名称",
+      "contextWindow": "上下文窗口",
+      "maxOutputTokens": "最大输出 Tokens",
+      "reasoningEffort": "思考等级",
+      "temperature": "温度",
+      "extraParams": "额外参数（JSON）",
+      "extraParamsHint": "可选，JSON 对象；目标表单不支持时会跳过。"
+    },
+    "genericTitle": "通用参数",
+    "genericHint": "当模型 id 没有命中任何预设时，可以用这份通用参数兜底。",
+    "genericAskToggle": "没有匹配预设时询问是否套用通用参数",
+    "save": "保存",
+    "cancel": "取消",
+    "saved": "模型预设已保存",
+    "saveFailed": "保存模型预设失败",
+    "deleteConfirmTitle": "删除模型预设",
+    "deleteConfirmDescription": "确定删除预设“{{name}}”吗？",
+    "invalidModelId": "模型 id 不能为空，且只能包含字母、数字和 . _ - : / * ?",
+    "duplicateModelId": "该模型匹配 id 已存在",
+    "invalidExtraParams": "额外参数必须是合法的 JSON 对象",
+    "reasoningDefault": "不设置（使用程序默认）",
+    "prompt": {
+      "title": "使用模型预设参数？",
+      "matchBody": "模型 {{model}} 匹配到预设“{{preset}}”。是否套用预设参数？",
+      "genericBody": "模型 {{model}} 没有匹配的预设，是否套用通用参数？",
+      "applyPreset": "使用预设参数",
+      "applyGeneric": "使用通用参数",
+      "skip": "不套用",
+      "note": "只影响当前这次新增的模型配置，可在设置里修改。",
+      "updated": "已套用预设参数",
+      "skipped": "以下参数当前表单不支持，已跳过：{{params}}"
+    },
+    "paramLabels": {
+      "contextWindow": "上下文窗口",
+      "maxOutputTokens": "最大输出 Tokens",
+      "reasoningEffort": "思考等级",
+      "temperature": "温度",
+      "extraParams": "额外参数"
     }
   }
 }

@@ -1,10 +1,11 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ComponentProps, PropsWithChildren } from "react";
 import { useForm } from "react-hook-form";
 import { describe, expect, it, vi } from "vitest";
 import { CodexFormFields } from "@/components/providers/forms/CodexFormFields";
 import { Form } from "@/components/ui/form";
+import { renderWithQueryClient } from "../utils/testQueryClient";
 
 vi.mock("@/hooks/useModelMetadataFill", () => ({
   useModelMetadataFill: () => () => {},
@@ -66,7 +67,8 @@ function codexFormProps(
 
 function renderCodexForm(overrides: Partial<CodexFormFieldsProps> = {}) {
   const props = codexFormProps(overrides);
-  render(
+  // 表单内部用 useModelPresetPrompt（useQuery），需要 QueryClientProvider。
+  renderWithQueryClient(
     <FormShell>
       <CodexFormFields {...props} />
     </FormShell>,
@@ -253,7 +255,7 @@ describe("CodexFormFields Auto Review model", () => {
         </form>
       </FormShell>
     );
-    const { rerender } = render(inForm({}));
+    const { rerender } = renderWithQueryClient(inForm({}));
     rerender(
       inForm({
         catalogModels: [

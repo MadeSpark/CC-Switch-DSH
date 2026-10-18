@@ -930,18 +930,11 @@
     "browsePlaceholderDsh": "例: /home/<your-username>/.dsh",
     "browseDirectory": "ディレクトリを選択",
     "resetDefault": "デフォルトに戻す（保存後に反映）",
-    "checkForUpdates": "アップデートを確認",
-    "updateTo": "v{{version}} に更新",
     "updating": "更新中...",
     "checking": "確認中...",
     "upToDate": "最新バージョンです",
     "aboutHint": "バージョン情報と更新状況を表示します。",
     "portableMode": "ポータブルモード: 更新は手動ダウンロードが必要です。",
-    "portableUpdateHint": "ポータブル版：上のボタンで新しい zip をダウンロードし、展開して既存の cc-switch.exe を上書きしてください。設定とデータはユーザーフォルダの .cc-switch に保存されており、上書きしても失われません。",
-    "updateAvailable": "新しいバージョンがあります: {{version}}",
-    "updateBadge": "更新あり",
-    "updateFailed": "更新のインストールに失敗しました。ダウンロードページを開こうとしました。",
-    "checkUpdateFailed": "更新の確認に失敗しました。時間をおいて再試行してください。",
     "openReleaseNotesFailed": "リリースノートの表示に失敗しました",
     "releaseNotes": "リリースノート",
     "viewReleaseNotes": "このバージョンのリリースノートを見る",
@@ -1061,7 +1054,8 @@
       "routing": "ローカルルーティング",
       "network": "ネットワーク",
       "data": "データ",
-      "about": "情報"
+      "about": "情報",
+      "modelPresets": "モデルプリセット"
     },
     "appConfig": {
       "configDir": "設定ディレクトリ"
@@ -1282,7 +1276,13 @@
     "noModels": "モデルがありません。「追加」をクリックして作成してください。",
     "defaultModel": "デフォルトモデル",
     "defaultModelHint": "DSH がデフォルトで使用するモデル。",
-    "defaultModelBackgroundHint": "このプロバイダーは DSH の現在のルートではないため、デフォルトモデルの変更は適用されません。"
+    "defaultModelBackgroundHint": "このプロバイダーは DSH の現在のルートではないため、デフォルトモデルの変更は適用されません。",
+    "displayName": "表示名",
+    "displayNameHint": "サイドバーとプロバイダーカードに表示する名前",
+    "reasoningEffort": "推論レベル",
+    "reasoningEffortHint": "DSH 設定に書き込む reasoningEffort（空欄なら省略）",
+    "maxTokens": "最大出力トークン",
+    "maxTokensHint": "DSH 設定に書き込む maxTokens（空欄なら省略）"
   },
   "appSwitcher": {
     "more": "その他のアプリ"
@@ -2667,17 +2667,9 @@
   },
   "dbUpgrade": {
     "title": "データベースのバージョンが新しすぎます",
-    "description": "このデータベースは新しいバージョンの CC Switch で作成されています。続行するにはアプリを更新してください。更新してもデータは削除されません。",
+    "description": "このデータベースは新しいバージョンの CC Switch で作成されています。このビルドはオンライン更新を確認しません。新しいビルドを手動でダウンロードして差し替えてください。データは削除されません。",
     "versionInfo": "データベース v{{db}} · アプリ対応 v{{supported}}",
     "dbPath": "データベースファイル",
-    "checking": "利用可能な更新を確認中…",
-    "updateAvailable": "新しいバージョン v{{version}} が利用可能です。更新すると続行できます。",
-    "incompatibleTitle": "更新しても解決できません",
-    "incompatibleDescription": "すでに最新バージョンですが、データベース（v{{db}}）はこのアプリの対応バージョン（v{{supported}}）より新しいままです。サードパーティ製クライアントまたはより新しいビルドで作成された可能性があり、公式アプリを更新しても互換性は得られません。",
-    "preparing": "更新を準備中…",
-    "downloading": "更新をダウンロード中…",
-    "upgradeNow": "アプリを更新",
-    "retry": "更新を再試行",
     "openReleases": "リリースページを開く",
     "openConfigDir": "設定フォルダを開く",
     "quit": "終了"
@@ -4170,7 +4162,6 @@
     "appsTitle": "アプリ：インストール、アップグレード、サイドバーに表示するもの",
     "appsHasUpdate": "アプリ · 更新があります",
     "settings": "設定",
-    "settingsHasUpdate": "設定 · CC Switch の新しいバージョンがあります",
     "mode": {
       "route": "ルーティング",
       "stack": "集約"
@@ -4906,6 +4897,57 @@
       "loading": "残量を確認中…",
       "refresh": "残量を更新",
       "refreshAria": "{{login}} の残量を更新"
+    }
+  },
+  "modelPresets": {
+    "title": "モデルプリセット",
+    "description": "モデル ID ごとにコンテキストウィンドウや推論レベルなどのパラメータをプリセットし、モデル追加時に適用できます。",
+    "addPreset": "プリセットを追加",
+    "editPreset": "プリセットを編集",
+    "deletePreset": "プリセットを削除",
+    "empty": "モデルプリセットはまだありません",
+    "emptyHint": "プリセットを追加すると、アプリに一致するモデルを追加する際に適用するか確認されます。",
+    "fields": {
+      "modelId": "一致するモデル ID",
+      "modelIdHint": "deepseek-v4-* のような * ワイルドカードに対応。完全一致が優先されます。",
+      "name": "プリセット名",
+      "contextWindow": "コンテキストウィンドウ",
+      "maxOutputTokens": "最大出力トークン",
+      "reasoningEffort": "推論レベル",
+      "temperature": "温度",
+      "extraParams": "追加パラメータ（JSON）",
+      "extraParamsHint": "任意。JSON オブジェクト。対象フォームが未対応の場合はスキップされます。"
+    },
+    "genericTitle": "汎用パラメータ",
+    "genericHint": "モデル ID がどのプリセットにも一致しない場合のフォールバックです。",
+    "genericAskToggle": "一致するプリセットがない場合に汎用パラメータを適用するか確認する",
+    "save": "保存",
+    "cancel": "キャンセル",
+    "saved": "モデルプリセットを保存しました",
+    "saveFailed": "モデルプリセットの保存に失敗しました",
+    "deleteConfirmTitle": "モデルプリセットを削除",
+    "deleteConfirmDescription": "プリセット「{{name}}」を削除しますか？",
+    "invalidModelId": "モデル ID は空にできず、英数字と . _ - : / * ? のみ使用できます",
+    "duplicateModelId": "この一致パターンは既に存在します",
+    "invalidExtraParams": "追加パラメータは有効な JSON オブジェクトである必要があります",
+    "reasoningDefault": "未設定（アプリの既定値）",
+    "prompt": {
+      "title": "モデルプリセットのパラメータを適用しますか？",
+      "matchBody": "モデル {{model}} はプリセット「{{preset}}」に一致します。パラメータを適用しますか？",
+      "genericBody": "モデル {{model}} に一致するプリセットはありません。汎用パラメータを適用しますか？",
+      "applyPreset": "プリセットを適用",
+      "applyGeneric": "汎用パラメータを適用",
+      "skip": "適用しない",
+      "note": "今回追加するモデルの設定にのみ適用されます。設定で変更できます。",
+      "updated": "プリセットのパラメータを適用しました",
+      "skipped": "このフォームでは未対応のためスキップしました：{{params}}"
+    },
+    "paramLabels": {
+      "contextWindow": "コンテキストウィンドウ",
+      "maxOutputTokens": "最大出力トークン",
+      "reasoningEffort": "推論レベル",
+      "temperature": "温度",
+      "extraParams": "追加パラメータ"
     }
   }
 }

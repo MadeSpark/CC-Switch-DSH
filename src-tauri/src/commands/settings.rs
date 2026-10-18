@@ -1,14 +1,6 @@
 #![allow(non_snake_case)]
 
-use tauri::{AppHandle, Emitter};
-use tauri_plugin_updater::UpdaterExt;
-
-/// 应用更新下载进度（通过 `update-download-progress` 事件发给前端）。
-#[derive(Clone, serde::Serialize)]
-struct UpdateDownloadProgress {
-    downloaded: u64,
-    total: Option<u64>,
-}
+use tauri::AppHandle;
 
 fn merge_settings_for_save(
     mut incoming: crate::settings::AppSettings,
@@ -43,6 +35,9 @@ fn merge_settings_for_save(
         }
         _ => {}
     }
+    if incoming.model_presets.is_none() {
+        incoming.model_presets = existing.model_presets.clone();
+    }
     // local_migrations 是纯后端状态（迁移完成标记），前端没有合法的修改场景，
     // 无条件取现有值。若按 incoming 透传：后端清掉 marker（如关闭统一会话
     // 开关）后、前端 query 缓存刷新前的一次全量保存会把旧 marker 重放回来，
@@ -58,6 +53,20 @@ fn merge_settings_for_save(
 #[tauri::command]
 pub async fn get_settings() -> Result<crate::settings::AppSettings, String> {
     Ok(crate::settings::get_settings_for_frontend())
+}
+
+/// 获取模型预设；没有保存过时返回空预设集合。
+#[tauri::command]
+pub fn get_model_presets() -> Result<crate::settings::ModelPresetSettings, String> {
+    Ok(crate::settings::get_model_presets())
+}
+
+/// 保存模型预设并返回实际落盘值。
+#[tauri::command]
+pub fn save_model_presets(
+    payload: crate::settings::ModelPresetSettings,
+) -> Result<crate::settings::ModelPresetSettings, String> {
+    crate::settings::save_model_presets(payload).map_err(|error| error.to_string())
 }
 
 /// 保存设置
@@ -261,99 +270,13 @@ pub async fn restart_app(app: AppHandle) -> Result<bool, String> {
     Ok(true)
 }
 
-/// 下载并安装应用更新，然后由后端直接重启应用。
+/// 应用使用本地版本，不再检查远程应用更新。
 ///
-/// macOS 更新会原地替换 `.app` bundle。如果先返回前端、再让旧 WebView 调
-/// `process.relaunch()`，旧进程可能已经处在 bundle 被替换后的不稳定窗口期。
-/// 这里把退出清理、安装和重启串在同一个后端流程中，避免依赖旧前端继续执行。
+/// 保留命令契约供数据库版本过新的恢复界面调用；返回 `None` 表示升级应用不能
+/// 通过远程更新解决当前兼容性问题。
 #[tauri::command]
-pub async fn install_update_and_restart(app: AppHandle) -> Result<bool, String> {
-    let updater = app
-        .updater_builder()
-        .build()
-        .map_err(|e| format!("初始化更新器失败: {e}"))?;
-
-    let Some(update) = updater
-        .check()
-        .await
-        .map_err(|e| format!("检查更新失败: {e}"))?
-    else {
-        return Ok(false);
-    };
-
-    log::info!("开始下载应用更新: {}", update.version);
-    let progress_handle = app.clone();
-    let mut downloaded: u64 = 0;
-    let bytes = update
-        .download(
-            move |chunk_len, content_len| {
-                downloaded = downloaded.saturating_add(chunk_len as u64);
-                let _ = progress_handle.emit(
-                    "update-download-progress",
-                    UpdateDownloadProgress {
-                        downloaded,
-                        total: content_len,
-                    },
-                );
-            },
-            || {},
-        )
-        .await
-        .map_err(|e| format!("下载更新失败: {e}"))?;
-
-    log::info!("开始安装应用更新: {}", update.version);
-
-    #[cfg(target_os = "windows")]
-    {
-        // Windows updater 会在 install() 内启动安装器并直接退出当前进程
-        // （插件内部 std::process::exit(0)，绕过 TrayIcon::drop、不发
-        // NIM_DELETE，会残留死图标——与托盘"退出"路径相同的问题）。
-        // 因此清理只能放在 install 前执行，且必须显式移除托盘图标。
-        crate::save_window_state_before_exit(&app);
-        crate::cleanup_before_exit(&app).await;
-        crate::remove_tray_icon_before_exit(&app);
-        crate::destroy_single_instance_lock(&app);
-        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-        update.install(bytes).map_err(|e| {
-            format!(
-                "Windows 更新安装失败: {e}。已执行退出前清理，代理或 Live 接管可能已暂停；请重启应用或重新开启代理后再试。"
-            )
-        })?;
-        Ok(true)
-    }
-
-    #[cfg(not(target_os = "windows"))]
-    {
-        // macOS/Linux install() 会返回；先安装，避免安装失败时误停代理/撤回接管。
-        update
-            .install(bytes)
-            .map_err(|e| format!("安装更新失败: {e}"))?;
-
-        crate::save_window_state_before_exit(&app);
-        crate::cleanup_before_exit(&app).await;
-
-        log::info!("应用更新安装完成，正在重启应用");
-        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-        crate::restart_process(&app);
-    }
-}
-
-/// 检查是否有可用的应用更新，返回可用的新版本号（无更新时返回 None）。
-///
-/// 数据库版本过新的恢复界面用它判断：升级应用能否解决问题。若返回 None，说明
-/// 已是最新版本，但数据库仍不兼容（通常由第三方客户端或更高版本创建），应提示用户
-/// 升级无法解决，而不是让其反复尝试。
-#[tauri::command]
-pub async fn check_app_update_available(app: AppHandle) -> Result<Option<String>, String> {
-    let updater = app
-        .updater_builder()
-        .build()
-        .map_err(|e| format!("初始化更新器失败: {e}"))?;
-    let update = updater
-        .check()
-        .await
-        .map_err(|e| format!("检查更新失败: {e}"))?;
-    Ok(update.map(|u| u.version))
+pub async fn check_app_update_available(_app: AppHandle) -> Result<Option<String>, String> {
+    Ok(None)
 }
 
 /// 获取 app_config_dir 覆盖配置 (从 Store)
@@ -389,8 +312,8 @@ mod tests {
     use super::merge_settings_for_save;
     use crate::settings::{
         AppSettings, CodexOfficialHistoryUnifyMigration, CodexProviderTemplateMigration,
-        CodexThirdPartyHistoryProviderBucketMigration, LocalMigrations, S3SyncSettings,
-        WebDavSyncSettings,
+        CodexThirdPartyHistoryProviderBucketMigration, LocalMigrations, ModelPreset,
+        ModelPresetParams, ModelPresetSettings, S3SyncSettings, WebDavSyncSettings,
     };
 
     #[test]
@@ -703,6 +626,66 @@ mod tests {
         let merged = merge_settings_for_save(incoming, &existing);
 
         assert!(merged.local_migrations.is_none());
+    }
+    #[test]
+    fn model_presets_serialize_with_camel_case_and_round_trip() {
+        let params = ModelPresetParams {
+            context_window: Some(128_000),
+            max_output_tokens: Some(16_000),
+            reasoning_effort: Some("high".to_string()),
+            temperature: Some(0.2),
+            extra_params: std::collections::BTreeMap::from([(
+                "cacheControl".to_string(),
+                serde_json::json!(true),
+            )]),
+        };
+        let settings = ModelPresetSettings {
+            presets: vec![ModelPreset {
+                id: "codex-high".to_string(),
+                name: "Codex High".to_string(),
+                model_id: "gpt-5-codex".to_string(),
+                params: params.clone(),
+            }],
+            generic: ModelPresetParams::default(),
+        };
+        let json = serde_json::to_value(&settings).unwrap();
+        assert_eq!(json["presets"][0]["modelId"], "gpt-5-codex");
+        assert_eq!(json["presets"][0]["contextWindow"], 128_000);
+        assert_eq!(json["presets"][0]["maxOutputTokens"], 16_000);
+        assert_eq!(json["presets"][0]["reasoningEffort"], "high");
+        assert_eq!(json["presets"][0]["extraParams"]["cacheControl"], true);
+        assert!(json["presets"][0].get("temperature").is_some());
+        assert_eq!(
+            serde_json::from_value::<ModelPresetSettings>(json)
+                .unwrap()
+                .presets[0]
+                .params,
+            params
+        );
+    }
+
+    #[test]
+    fn model_presets_default_when_legacy_settings_omit_field() {
+        let settings: AppSettings = serde_json::from_value(serde_json::json!({})).unwrap();
+        assert!(settings.model_presets.is_none());
+    }
+
+    #[test]
+    fn save_settings_preserves_model_presets_when_payload_omits_them() {
+        let existing = AppSettings {
+            model_presets: Some(ModelPresetSettings {
+                presets: vec![ModelPreset {
+                    id: "preset-1".to_string(),
+                    name: "Preset 1".to_string(),
+                    model_id: "model-1".to_string(),
+                    params: ModelPresetParams::default(),
+                }],
+                generic: ModelPresetParams::default(),
+            }),
+            ..AppSettings::default()
+        };
+        let merged = merge_settings_for_save(AppSettings::default(), &existing);
+        assert_eq!(merged.model_presets, existing.model_presets);
     }
 }
 

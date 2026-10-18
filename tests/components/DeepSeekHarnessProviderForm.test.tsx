@@ -107,6 +107,15 @@ describe("DeepSeek Harness provider form (shared shell)", () => {
     fireEvent.change(container.querySelector('input[name="name"]')!, {
       target: { value: "Company Gateway" },
     });
+    fireEvent.change(screen.getByLabelText("deepseekHarness.displayName"), {
+      target: { value: "Company Gateway" },
+    });
+    fireEvent.change(screen.getByLabelText("deepseekHarness.reasoningEffort"), {
+      target: { value: "high" },
+    });
+    fireEvent.change(screen.getByLabelText("deepseekHarness.maxTokens"), {
+      target: { value: "64000" },
+    });
     fireEvent.change(screen.getByLabelText(/Provider Key/), {
       target: { value: "company-gateway" },
     });
@@ -131,8 +140,11 @@ describe("DeepSeek Harness provider form (shared shell)", () => {
     expect(values.providerKey).toBe("company-gateway");
     expect(values.meta?.providerType).toBe("dsh_pi_ai");
     expect(values.meta?.dshCurrentModel).toBe("glm-5.3");
+    expect(values.name).toBe("Company Gateway");
     expect(JSON.parse(values.settingsConfig)).toMatchObject({
-      displayName: "Custom DSH",
+      displayName: "Company Gateway",
+      reasoningEffort: "high",
+      maxTokens: 64000,
       api: "openai-completions",
       baseURL: "https://gateway.example/v1",
       apiKeyEnv: "CUSTOM_DSH_API_KEY",
@@ -194,6 +206,8 @@ describe("DeepSeek Harness provider form (shared shell)", () => {
           baseURL: "https://company.example/v1",
           apiKeyEnv: "COMPANY_API_KEY",
           apiKey: "secret",
+          reasoningEffort: "medium",
+          maxTokens: 32000,
           models: [{ id: "deepseek-v4-pro", name: "DeepSeek V4 Pro" }],
         },
         meta: { providerType: "dsh_pi_ai", dshCurrentModel: "deepseek-v4-pro" },
@@ -208,6 +222,15 @@ describe("DeepSeek Harness provider form (shared shell)", () => {
       "company-gateway",
     );
     expect(screen.getByLabelText(/Provider Key/)).toBeDisabled();
+    expect(screen.getByLabelText("deepseekHarness.displayName")).toHaveValue(
+      "Company Gateway",
+    );
+    expect(
+      screen.getByLabelText("deepseekHarness.reasoningEffort"),
+    ).toHaveValue("medium");
+    expect(screen.getByLabelText("deepseekHarness.maxTokens")).toHaveValue(
+      32000,
+    );
     expect(screen.getByLabelText("Base URL")).toHaveValue(
       "https://company.example/v1",
     );

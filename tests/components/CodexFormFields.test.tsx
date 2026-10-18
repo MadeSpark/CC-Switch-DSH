@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import type { ComponentProps, PropsWithChildren } from "react";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { CodexFormFields } from "@/components/providers/forms/CodexFormFields";
 import { Form } from "@/components/ui/form";
 import type { FetchedModel } from "@/lib/api/model-fetch";
+import { renderWithQueryClient } from "../utils/testQueryClient";
 
 const modelFetchApiMock = vi.hoisted(() => ({
   fetchModelsForConfig: vi.fn(),
@@ -23,6 +24,7 @@ vi.mock("@/lib/api/model-fetch", () => ({
 
 // 上游 v4.0.0 起 CodexFormFields 内部使用 useModelMetadataFill（依赖
 // QueryClientProvider）；本文件只测 model fetch 行为，mock 成 no-op 即可。
+// 模型预设（useModelPresetPrompt）同样依赖 QueryClient，用 renderWithQueryClient 包。
 vi.mock("@/hooks/useModelMetadataFill", () => ({
   useModelMetadataFill: () => () => {},
 }));
@@ -97,7 +99,7 @@ function renderCodexForm() {
     );
   }
 
-  return render(<Harness />);
+  return renderWithQueryClient(<Harness />);
 }
 
 async function fetchAndSettleModels(models: FetchedModel[]) {

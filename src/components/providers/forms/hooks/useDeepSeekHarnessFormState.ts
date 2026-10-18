@@ -23,6 +23,12 @@ interface UseDeepSeekHarnessFormStateParams {
 export interface DeepSeekHarnessFormState {
   dshProviderKey: string;
   setDshProviderKey: (key: string) => void;
+  dshDisplayName: string;
+  handleDshDisplayNameChange: (displayName: string) => void;
+  dshReasoningEffort: string;
+  handleDshReasoningEffortChange: (value: string) => void;
+  dshMaxTokens: string;
+  handleDshMaxTokensChange: (value: string) => void;
   dshIsOfficial: boolean;
   dshApiKey: string;
   dshApiKeyEnv: string;
@@ -69,6 +75,38 @@ export function useDeepSeekHarnessFormState({
         ? "deepseek-official"
         : "")
     );
+  });
+
+  const [dshDisplayName, setDshDisplayName] = useState<string>(() => {
+    if (appId !== "deepseek-harness") return "";
+    return typeof initial.displayName === "string"
+      ? initial.displayName
+      : String(
+          (isDshOfficial(
+            providerId,
+            initialData?.category,
+            initial,
+            initialData?.meta?.providerType,
+          )
+            ? DSH_OFFICIAL_DEFAULT_CONFIG
+            : DSH_CUSTOM_DEFAULT_CONFIG
+          ).displayName ?? "Custom DSH",
+        );
+  });
+
+  const [dshReasoningEffort, setDshReasoningEffort] = useState<string>(() => {
+    if (appId !== "deepseek-harness") return "";
+    return typeof initial.reasoningEffort === "string"
+      ? initial.reasoningEffort
+      : "";
+  });
+
+  const [dshMaxTokens, setDshMaxTokens] = useState<string>(() => {
+    if (appId !== "deepseek-harness") return "";
+    return typeof initial.maxTokens === "number" &&
+      Number.isSafeInteger(initial.maxTokens)
+      ? String(initial.maxTokens)
+      : "";
   });
 
   const [dshIsOfficial, setDshIsOfficial] = useState<boolean>(() => {
@@ -145,6 +183,51 @@ export function useDeepSeekHarnessFormState({
     [getSettingsConfig, onSettingsConfigChange, dshIsOfficial],
   );
 
+  const handleDshDisplayNameChange = useCallback(
+    (displayName: string) => {
+      setDshDisplayName(displayName);
+      updateDshSettings((config) => {
+        const value = displayName.trim();
+        if (value) config.displayName = value;
+        else delete config.displayName;
+      });
+    },
+    [updateDshSettings],
+  );
+
+  const handleDshReasoningEffortChange = useCallback(
+    (value: string) => {
+      setDshReasoningEffort(value);
+      updateDshSettings((config) => {
+        const normalized = value.trim();
+        if (normalized) config.reasoningEffort = normalized;
+        else delete config.reasoningEffort;
+      });
+    },
+    [updateDshSettings],
+  );
+
+  const handleDshMaxTokensChange = useCallback(
+    (value: string) => {
+      const normalized = value.replace(/[^0-9]/g, "");
+      if (normalized === "") {
+        setDshMaxTokens("");
+        updateDshSettings((config) => {
+          delete config.maxTokens;
+        });
+        return;
+      }
+      const parsed = Number(normalized);
+      if (!Number.isSafeInteger(parsed) || parsed < 0) return;
+      const next = String(parsed);
+      setDshMaxTokens(next);
+      updateDshSettings((config) => {
+        config.maxTokens = parsed;
+      });
+    },
+    [updateDshSettings],
+  );
+
   const handleDshApiKeyChange = useCallback(
     (apiKey: string) => {
       setDshApiKey(apiKey);
@@ -212,6 +295,28 @@ export function useDeepSeekHarnessFormState({
 
       setDshIsOfficial(official);
       setDshProviderKey(official ? "deepseek-official" : "");
+      setDshDisplayName(
+        typeof source.displayName === "string"
+          ? source.displayName
+          : String(
+              (official
+                ? DSH_OFFICIAL_DEFAULT_CONFIG
+                : DSH_CUSTOM_DEFAULT_CONFIG
+              ).displayName ?? "Custom DSH",
+            ),
+      );
+      setDshReasoningEffort(
+        typeof source.reasoningEffort === "string"
+          ? source.reasoningEffort
+          : "",
+      );
+      setDshMaxTokens(
+        typeof source.maxTokens === "number" &&
+          Number.isSafeInteger(source.maxTokens) &&
+          source.maxTokens >= 0
+          ? String(source.maxTokens)
+          : "",
+      );
       setDshApiKey(typeof source.apiKey === "string" ? source.apiKey : "");
       const apiKeyEnv =
         typeof source.apiKeyEnv === "string" ? source.apiKeyEnv : "";
@@ -233,6 +338,12 @@ export function useDeepSeekHarnessFormState({
   return {
     dshProviderKey,
     setDshProviderKey,
+    dshDisplayName,
+    handleDshDisplayNameChange,
+    dshReasoningEffort,
+    handleDshReasoningEffortChange,
+    dshMaxTokens,
+    handleDshMaxTokensChange,
     dshIsOfficial,
     dshApiKey,
     dshApiKeyEnv,

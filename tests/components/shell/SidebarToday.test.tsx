@@ -21,10 +21,6 @@ vi.mock("react-i18next", () => ({
   }),
 }));
 
-vi.mock("@/contexts/UpdateContext", () => ({
-  useUpdate: () => ({ hasUpdate: false, updateInfo: null }),
-}));
-
 vi.mock("@/hooks/useSidebarStatus", () => ({
   useSidebarStatus: () => ({
     appStatus: () => ({ mode: "direct", alert: false }),

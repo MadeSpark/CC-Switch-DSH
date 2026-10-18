@@ -392,6 +392,43 @@ pub struct UsageDisplaySettings {
     pub request_log_columns: BTreeMap<String, bool>,
 }
 
+/// 参数模板，可应用到新模型或作为通用默认值。
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelPresetParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_window: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_output_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<f64>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub extra_params: BTreeMap<String, serde_json::Value>,
+}
+
+/// 一个命名模型预设。
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelPreset {
+    pub id: String,
+    pub name: String,
+    pub model_id: String,
+    #[serde(flatten)]
+    pub params: ModelPresetParams,
+}
+
+/// 所有命名预设以及一个可直接套用的通用参数模板。
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelPresetSettings {
+    #[serde(default)]
+    pub presets: Vec<ModelPreset>,
+    #[serde(default)]
+    pub generic: ModelPresetParams,
+}
+
 /// 应用设置结构
 ///
 /// 存储设备级别设置，保存在本地 `~/.cc-switch/settings.json`，不随数据库同步。
@@ -436,6 +473,9 @@ pub struct AppSettings {
     /// 用量金额的显示币种与汇率（只影响显示）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage_display: Option<UsageDisplaySettings>,
+    /// 用户保存的模型参数预设与通用参数。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_presets: Option<ModelPresetSettings>,
     /// 会话用量自动扫描开关（默认开启=自动模式）。关闭后停止后台定时扫描
     /// 各客户端会话日志，仅在用户点击"立即同步"时手动扫描；只管扫描时机，
     /// 代理接管记账与启动费用回填（不读会话文件）不受此开关影响。
@@ -637,6 +677,7 @@ impl Default for AppSettings {
             usage_confirmed: None,
             usage_dashboard_refresh_interval_ms: None,
             usage_display: None,
+            model_presets: None,
             session_auto_sync_enabled: true,
             enable_failover_toggle: false,
             show_profile_switcher: false,
@@ -1026,6 +1067,17 @@ pub fn get_settings_for_frontend() -> AppSettings {
     }
     settings.webdav_backup = None;
     settings
+}
+
+pub fn get_model_presets() -> ModelPresetSettings {
+    get_settings().model_presets.unwrap_or_default()
+}
+
+pub fn save_model_presets(presets: ModelPresetSettings) -> Result<ModelPresetSettings, AppError> {
+    let mut settings = get_settings();
+    settings.model_presets = Some(presets);
+    update_settings(settings)?;
+    Ok(get_model_presets())
 }
 
 pub fn update_settings(mut new_settings: AppSettings) -> Result<(), AppError> {

@@ -915,17 +915,11 @@
     "browsePlaceholderPi": "ör. /home/<your-username>/.pi/agent",
     "browseDirectory": "Dizine Göz Atın",
     "resetDefault": "Varsayılan dizine sıfırla (kaydettikten sonra etkili olur)",
-    "checkForUpdates": "Güncellemeleri Kontrol Et",
-    "updateTo": "v{{version}}'ye güncelleme",
     "updating": "Güncelleniyor...",
     "checking": "Kontrol ediliyor...",
     "upToDate": "Güncel",
     "aboutHint": "Sürüm bilgilerini ve güncelleme durumunu görüntüleyin.",
     "portableMode": "Taşınabilir mod: Güncellemeler manuel olarak indirilmeyi gerektirir.",
-    "updateAvailable": "Yeni sürüm mevcut: {{version}}",
-    "updateBadge": "Güncelleme mevcut",
-    "updateFailed": "Güncelleme yüklemesi başarısız oldu, indirme sayfası açılmaya çalışıldı.",
-    "checkUpdateFailed": "Güncellemeler kontrol edilemedi. Lütfen daha sonra tekrar deneyin.",
     "openReleaseNotesFailed": "Sürüm notları açılamadı",
     "releaseNotes": "Sürüm Notları",
     "viewReleaseNotes": "Bu sürümün sürüm notlarını görüntüle",
@@ -1045,7 +1039,8 @@
       "routing": "Yerel yönlendirme",
       "network": "Ağ",
       "data": "Veri",
-      "about": "Hakkında"
+      "about": "Hakkında",
+      "modelPresets": "Model ön ayarları"
     },
     "appConfig": {
       "configDir": "Yapılandırma dizini"
@@ -2568,17 +2563,9 @@
   },
   "dbUpgrade": {
     "title": "Veritabanı sürümü çok yeni",
-    "description": "Bu veritabanı CC Switch’in daha yeni bir sürümü tarafından oluşturuldu. Devam etmek için uygulamayı yükseltin. Yükseltme verilerinizi silmez.",
+    "description": "Bu veritabanı CC Switch’in daha yeni bir sürümü tarafından oluşturuldu. Bu derleme çevrimiçi güncelleme denetlemez; devam etmek için daha yeni bir derlemeyi elle indirip uygulamayı değiştirin. Verileriniz silinmez.",
     "versionInfo": "Veritabanı v{{db}} · Uygulama v{{supported}}'yi destekliyor",
     "dbPath": "Veritabanı dosyası",
-    "checking": "Mevcut güncellemeler kontrol ediliyor…",
-    "updateAvailable": "Sürüm v{{version}} mevcuttur; yükseltme devam etmenize izin verecektir.",
-    "incompatibleTitle": "Yükseltme bunu düzeltmez",
-    "incompatibleDescription": "Zaten en son sürümü kullanıyorsunuz ancak veritabanı (v{{db}}) hala bu uygulamanın desteklediğinden (v{{supported}}) daha yeni. Büyük olasılıkla üçüncü taraf bir istemci veya daha yeni bir yapı tarafından oluşturulmuş olduğundan, resmi uygulamayı yükseltmek onu uyumlu hale getiremez.",
-    "preparing": "Güncelleme hazırlanıyor…",
-    "downloading": "Güncelleme indiriliyor…",
-    "upgradeNow": "Uygulamayı yükselt",
-    "retry": "Yükseltmeyi yeniden dene",
     "openReleases": "Sürümler sayfasını aç",
     "openConfigDir": "Yapılandırma klasörünü aç",
     "quit": "Çık"
@@ -4068,7 +4055,6 @@
     "appsTitle": "Uygulamalar: yükleyin, yükseltin, kenar çubuğunda hangilerinin gösterileceğini seçin",
     "appsHasUpdate": "Uygulamalar · güncellemeler mevcut",
     "settings": "Ayarlar",
-    "settingsHasUpdate": "Ayarlar · yeni bir CC Switch sürümü mevcut",
     "mode": {
       "route": "Yönlendirme",
       "stack": "Birleştirme",
@@ -4785,6 +4771,65 @@
       "loading": "Kota kontrol ediliyor…",
       "refresh": "Kotayı yenile",
       "refreshAria": "{{login}} için kotayı yenileyin"
+    }
+  },
+  "deepseekHarness": {
+    "displayName": "Görünen ad",
+    "displayNameHint": "Kenar çubuğunda ve sağlayıcı kartında gösterilen ad",
+    "reasoningEffort": "Düşünme düzeyi",
+    "reasoningEffortHint": "DSH yapılandırmasına yazılan reasoningEffort (boş bırakılırsa yazılmaz)",
+    "maxTokens": "Maksimum çıktı token'ı",
+    "maxTokensHint": "DSH yapılandırmasına yazılan maxTokens (boş bırakılırsa yazılmaz)"
+  },
+  "modelPresets": {
+    "title": "Model ön ayarları",
+    "description": "Model kimliğine göre bağlam penceresi ve düşünme düzeyi gibi parametreleri önceden tanımlayın; eşleşen model eklenirken uygulanır.",
+    "addPreset": "Ön ayar ekle",
+    "editPreset": "Ön ayarı düzenle",
+    "deletePreset": "Ön ayarı sil",
+    "empty": "Henüz model ön ayarı yok",
+    "emptyHint": "Ön ayar ekledikten sonra, uygulamaya eşleşen bir model eklerken uygulanıp uygulanmayacağı sorulur.",
+    "fields": {
+      "modelId": "Eşleşen model kimliği",
+      "modelIdHint": "deepseek-v4-* gibi * joker karakterleri destekler; tam eşleşme önceliklidir.",
+      "name": "Ön ayar adı",
+      "contextWindow": "Bağlam penceresi",
+      "maxOutputTokens": "Maksimum çıktı token'ı",
+      "reasoningEffort": "Düşünme düzeyi",
+      "temperature": "Sıcaklık",
+      "extraParams": "Ek parametreler (JSON)",
+      "extraParamsHint": "İsteğe bağlı JSON nesnesi; hedef form desteklemiyorsa atlanır."
+    },
+    "genericTitle": "Genel parametreler",
+    "genericHint": "Bir model kimliği hiçbir ön ayarla eşleşmediğinde yedek olarak kullanılır.",
+    "genericAskToggle": "Eşleşen ön ayar yoksa genel parametrelerin uygulanması sorulsun",
+    "save": "Kaydet",
+    "cancel": "İptal",
+    "saved": "Model ön ayarları kaydedildi",
+    "saveFailed": "Model ön ayarları kaydedilemedi",
+    "deleteConfirmTitle": "Model ön ayarını sil",
+    "deleteConfirmDescription": "\"{{name}}\" ön ayarı silinsin mi?",
+    "invalidModelId": "Model kimliği boş olamaz; yalnızca harf, rakam ve . _ - : / * ? içerebilir",
+    "duplicateModelId": "Bu model deseni zaten var",
+    "invalidExtraParams": "Ek parametreler geçerli bir JSON nesnesi olmalıdır",
+    "reasoningDefault": "Ayarlanmadı (uygulama varsayılanı)",
+    "prompt": {
+      "title": "Model ön ayar parametreleri uygulansın mı?",
+      "matchBody": "{{model}} modeli \"{{preset}}\" ön ayarıyla eşleşiyor. Parametreleri uygulansın mı?",
+      "genericBody": "{{model}} modeli hiçbir ön ayarla eşleşmiyor. Genel parametreler uygulansın mı?",
+      "applyPreset": "Ön ayarı uygula",
+      "applyGeneric": "Genel parametreleri uygula",
+      "skip": "Uygulama",
+      "note": "Yalnızca bu yeni eklenen modeli etkiler; ayarlardan değiştirebilirsiniz.",
+      "updated": "Ön ayar parametreleri uygulandı",
+      "skipped": "Bu formda desteklenmiyor, atlandı: {{params}}"
+    },
+    "paramLabels": {
+      "contextWindow": "Bağlam penceresi",
+      "maxOutputTokens": "Maksimum çıktı token'ı",
+      "reasoningEffort": "Düşünme düzeyi",
+      "temperature": "Sıcaklık",
+      "extraParams": "Ek parametreler"
     }
   }
 }
