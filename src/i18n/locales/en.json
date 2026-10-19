@@ -1236,16 +1236,6 @@
       "templateRestored": "Wrote ~/.pi/agent/prompts/{{slug}}.md back"
     }
   },
-  "dsh": {
-    "provider": {
-      "enabled": "Enabled in DSH",
-      "removed": "Removed from DSH",
-      "noModels": "This provider has no configured models",
-      "defaultSet": "Set as the DSH default model",
-      "defaultFailed": "Could not set the DSH default model",
-      "selectDefaultModel": "Select default model"
-    }
-  },
   "deepseekHarness": {
     "providerKey": "Provider Key",
     "providerKeyRequired": "Provider Key is required",
@@ -4958,6 +4948,11 @@
     "relayLabel": "Route DSH requests through CC Switch",
     "relayDescription": "When enabled, each DSH provider's API base URL is rewritten to CC Switch's local relay; disabling it restores the original direct URLs right away.",
     "relayHelp": "The relay is usually http://127.0.0.1:15721. It disappears once CC Switch quits: with auto-restore off, DSH can no longer connect until you switch the URLs back manually.",
+    "help": {
+      "title": "How direct and routing differ",
+      "direct": "Direct: DSH connects to the chosen provider itself; CC Switch never touches the request.",
+      "route": "Routing: DSH's requests first go to CC Switch on this machine, which forwards them to the provider, so token usage is metered here."
+    },
     "relayEnabled": "DSH relay enabled; API URLs now point at the local relay",
     "relayDisabled": "DSH relay disabled; API URLs restored to direct",
     "relayFailed": "Failed to toggle DSH relay: {{detail}}",
@@ -4978,6 +4973,9 @@
     "baseUrlLabel": "Current address",
     "baseUrlUnknown": "Not running",
     "baseUrlNotRelayed": "Not relayed",
+    "modeStatus": {
+      "routeValue": "{{count}} providers"
+    },
     "providersTitle": "Provider addresses",
     "noProviders": "Provider addresses appear here once the relay is on.",
     "noProvidersAttached": "Relay is attached, but no provider address was rewritten — DSH may have no usable provider config. Check the config or logs.",

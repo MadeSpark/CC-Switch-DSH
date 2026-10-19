@@ -4,12 +4,14 @@ DSH 中转把 DSH provider 的请求先送到 CC Switch 本机，再由 CC Switc
 
 ## 入口在哪
 
-`4.0.14-dsh.4` 起，中转入口从设置页迁到 DeepSeek Harness 应用页。侧栏选中 DeepSeek Harness 后，页头并排两个页签：
+`4.0.14-dsh.4` 起，中转入口从设置页迁到 DeepSeek Harness 应用页；`4.0.14-dsh.5` 起，页头改成 Claude Code 同款分段控件（圆角分组 `直連 | 路由` + `?` 说明 + 生效状态行 + 右侧中转开关）：
 
 - **「直连」**（繁中界面为「直連」）：原来的供应商列表，直接读写 DSH 自己的 provider 配置；它和 CC Switch 中转无关。
 - **「路由」**：CC Switch 中转本体，中转开关、退出还原开关和中转状态都在这里。
 
-因此操作上一律走“侧栏选 DeepSeek Harness → 页头「路由」页签”。设置页不再有「DSH 中转」分组；旧版本在本地存过 `section: "dsh"` 的，会落到设置页的「本地路由」分组。
+滑块高亮的是**正在看**的模式，**实际生效**的模式由状态行文字给出（`attached` 为真时显示「路由生效中 → \<provider\>」，否则显示直连的「\<供应商\> · \<模型\>」）。页头右侧的开关是 `dsh_set_relay` 的快捷入口，和「路由」里的开关是同一个设置。
+
+因此操作上一律走“侧栏选 DeepSeek Harness → 页头切到「路由」”。设置页不再有「DSH 中转」分组；旧版本在本地存过 `section: "dsh"` 的，会落到设置页的「本地路由」分组。
 
 ## 工作方式
 
@@ -26,7 +28,7 @@ DSH 后续追加的 `/v1/messages`、`/v1/responses` 等路径会原样拼回原
 - 原始直连地址：用户在 DSH provider 中配置的 API 地址。
 - 中转地址：由本机监听端口和 `/dsh/<providerId>` 路径组成的地址。
 
-「路由」页签会显示中转是否已附加、本机中转地址，以及每个 provider 的“原始地址 → 中转地址”关系。前端状态接口模型位于 `src/lib/api/dsh.ts` 的 `DshRelayProvider` 和 `DshRelayStatus`。
+「路由」模式会显示中转是否已附加、本机中转地址，以及每个 provider 的“原始地址 → 中转地址”关系。前端状态接口模型位于 `src/lib/api/dsh.ts` 的 `DshRelayProvider` 和 `DshRelayStatus`。
 
 ## 命令、设置与状态文件
 
@@ -91,20 +93,20 @@ Windows 上通常展开为 `C:\Users\<用户>\.cc-switch\dsh_relay_state.json`�
 
 `PROXY_APPS` 是 CC Switch 现有应用级代理堆栈的集合。DSH provider 同步和当前模型选择由 DSH 原生配置负责；DSH 中转只是在 provider 地址层增加一个可选的本机入口。把 DSH 加入 `PROXY_APPS` 会把它误当作已有的应用级代理接管对象，可能触发不适用的堆栈切换、退出逻辑和故障转移行为。
 
-因此 DSH 使用独立的 relay 状态、独立的 `dsh_*` 命令和独立的页面入口（DeepSeek Harness 应用页的「路由」页签，不占用设置页分组）。前端开关调用 `dsh_set_relay` 与 `dsh_set_restore_on_exit`，状态查询调用 `dsh_relay_status`；这些命令不依赖 `PROXY_APPS` 的应用开关。
+因此 DSH 使用独立的 relay 状态、独立的 `dsh_*` 命令和独立的页面入口（DeepSeek Harness 应用页的「路由」模式，不占用设置页分组）。前端开关调用 `dsh_set_relay` 与 `dsh_set_restore_on_exit`，状态查询调用 `dsh_relay_status`；这些命令不依赖 `PROXY_APPS` 的应用开关。
 
 ## 操作步骤
 
 1. 确认 DSH provider 已经可以直连工作，并保存当前配置。
-2. 侧栏选中 DeepSeek Harness，再切到页头的「路由」页签。
-3. 打开“使用 CC Switch 中转 DSH 请求”，确认状态区域显示本机中转地址和 provider 的地址映射。
+2. 侧栏选中 DeepSeek Harness，再切到页头分段控件里的「路由」。
+3. 打开“使用 CC Switch 中转 DSH 请求”（页头右侧开关与这一行是同一个设置），确认状态区域显示本机中转地址和 provider 的地址映射。
 4. 需要退出 CCS 后继续让 DSH 直连时，保持“退出 CC Switch 时自动还原直连地址”开启。
 5. 退出 CCS 后重新检查 DSH provider 的 `baseURL`，应恢复到开启中转前保存的原始地址。
 6. 如果状态不可用，先保持开关关闭并检查 CCS 日志、DSH 配置权限和本机端口占用。
 
 ## 故障降级
 
-「路由」页签读取中转状态失败时，不会重试或盲目写配置，而是显示状态不可用并禁用两个开关。中转启动或某个 provider 更新失败时，应保留可识别的错误，不能用空地址覆盖 provider。请求转发失败时，DSH 看到对应的上游错误；CCS 不改写响应 JSON。
+「路由」读取中转状态失败时，不会重试或盲目写配置，而是显示状态不可用并禁用两个开关（页头那个快捷开关同样 disabled）。中转启动或某个 provider 更新失败时，应保留可识别的错误，不能用空地址覆盖 provider。请求转发失败时，DSH 看到对应的上游错误；CCS 不改写响应 JSON。
 
 多个 CCS 实例、外部同时修改 DSH provider、原始地址缺失和端口占用需要按实际运行环境排查。启动自愈负责处理崩溃和强杀留下的 attached 状态。
 

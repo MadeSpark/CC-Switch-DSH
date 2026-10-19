@@ -654,7 +654,6 @@ export interface AdditiveInput {
   isHermesManaged?: (provider: Provider) => boolean;
   /** DSH：原生配置当前供应商和当前模型 */
   dshCurrent?: { providerId: string | null; model: string | null } | null;
-  dshModels?: (provider: Provider) => { id: string; name?: string }[];
   /** Pi：读不到当前配置时一律不能改 */
   piStateUnavailable?: boolean;
   actions: {
@@ -762,6 +761,8 @@ export function buildAdditiveSections(input: AdditiveInput): ProviderSection[] {
     let isDefault = false;
     let removeReason: string | undefined = piBlocked;
 
+    // DSH 是加法式（additive）应用，和 OpenCode 一样只提供「加入 / 移除」：
+    // 当前生效的供应商由 DSH 自己的配置决定，卡片上只做只读展示。
     if (app === "deepseek-harness") {
       isDefault = input.dshCurrent?.providerId === p.id;
       if (isDefault) {
@@ -775,28 +776,6 @@ export function buildAdditiveSections(input: AdditiveInput): ProviderSection[] {
           });
         }
         removeReason = t("providerCard.reason.currentCannotRemove");
-      } else {
-        const models = input.dshModels?.(p) ?? [];
-        buttons.push({
-          key: "setDshDefault",
-          label: t("providerCard.action.setDefault"),
-          onClick: () => actions.setDefault(p, models[0]?.id),
-          menu:
-            models.length > 1
-              ? {
-                  title: t("providerCard.action.setDefault"),
-                  options: models.map((model) => ({
-                    key: model.id,
-                    label: model.name?.trim() || model.id,
-                    detail:
-                      model.name?.trim() && model.name.trim() !== model.id
-                        ? model.id
-                        : undefined,
-                    onSelect: () => actions.setDefault(p, model.id),
-                  })),
-                }
-              : undefined,
-        });
       }
     }
 

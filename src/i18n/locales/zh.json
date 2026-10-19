@@ -1236,16 +1236,6 @@
       "templateRestored": "已写回 ~/.pi/agent/prompts/{{slug}}.md"
     }
   },
-  "dsh": {
-    "provider": {
-      "enabled": "已在 DSH 中启用",
-      "removed": "已从 DSH 移除",
-      "noModels": "该供应商没有配置模型",
-      "defaultSet": "已设为 DSH 默认模型",
-      "defaultFailed": "设置 DSH 默认模型失败",
-      "selectDefaultModel": "选择默认模型"
-    }
-  },
   "deepseekHarness": {
     "providerKey": "Provider Key",
     "providerKeyRequired": "请填写 Provider Key",
@@ -4958,6 +4948,11 @@
     "relayLabel": "使用 CC Switch 中转 DSH 请求",
     "relayDescription": "开启后，DSH 各 provider 的 API 地址会被改写为 CC Switch 的本机中转地址；关闭则立即还原为原始直连地址。",
     "relayHelp": "中转地址通常是 http://127.0.0.1:15721。退出 CC Switch 后中转即失效：若关闭自动还原，DSH 会连不上，需要手动改回直连地址。",
+    "help": {
+      "title": "直连与路由的区别",
+      "direct": "直连：DSH 直接连接所选供应商，CC Switch 不经手任何请求。",
+      "route": "路由：DSH 的请求先送到本机 CC Switch，再由它转发给供应商，可在这里统一计量 token。"
+    },
     "relayEnabled": "已开启 DSH 中转，API 地址已切到本机中转",
     "relayDisabled": "已关闭 DSH 中转，API 地址已还原为直连",
     "relayFailed": "切换 DSH 中转失败：{{detail}}",
@@ -4978,6 +4973,9 @@
     "baseUrlLabel": "当前地址",
     "baseUrlUnknown": "尚未启动",
     "baseUrlNotRelayed": "未接管",
+    "modeStatus": {
+      "routeValue": "{{count}} 家供应商"
+    },
     "providersTitle": "Provider 地址",
     "noProviders": "接管开启时，各 provider 的地址会显示在这里。",
     "noProvidersAttached": "已接管，但没有任何 provider 地址被改写——DSH 配置里可能没有可用的 provider，请检查配置或查看日志。",

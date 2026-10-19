@@ -4836,6 +4836,11 @@
     "relayLabel": "DSH isteklerini CC Switch üzerinden aktar",
     "relayDescription": "Açıldığında DSH sağlayıcılarının API temel adresleri CC Switch'in yerel aktarım adresine yazılır; kapatıldığında özgün doğrudan adresler hemen geri yüklenir.",
     "relayHelp": "Aktarım adresi genellikle http://127.0.0.1:15721'dir. CC Switch kapandığında aktarım geçersiz olur; otomatik geri yükleme kapalıysa DSH bağlanamaz ve adresleri elle doğrudan bağlantıya çevirmeniz gerekir.",
+    "help": {
+      "title": "Doğrudan bağlantı ile yönlendirme arasındaki fark",
+      "direct": "Doğrudan: DSH seçilen sağlayıcıya kendisi bağlanır; CC Switch isteklere hiç dokunmaz.",
+      "route": "Yönlendirme: DSH istekleri önce bu makinedeki CC Switch'e gider, oradan sağlayıcıya iletilir; token tüketimi burada tek yerden ölçülür."
+    },
     "relayEnabled": "DSH aktarımı açıldı; API adresleri yerel aktarıma yönlendirildi",
     "relayDisabled": "DSH aktarımı kapatıldı; API adresleri doğrudan bağlantıya geri yüklendi",
     "relayFailed": "DSH aktarımı değiştirilemedi: {{detail}}",
@@ -4856,6 +4861,9 @@
     "baseUrlLabel": "Geçerli adres",
     "baseUrlUnknown": "Çalışmıyor",
     "baseUrlNotRelayed": "Devralınmadı",
+    "modeStatus": {
+      "routeValue": "{{count}} sağlayıcı"
+    },
     "providersTitle": "Sağlayıcı adresleri",
     "noProviders": "Aktarım açıldığında sağlayıcı adresleri burada görünür.",
     "noProvidersAttached": "Aktarım devrede ancak hiçbir provider adresi yeniden yazılmadı — DSH'de kullanılabilir provider yapılandırması olmayabilir. Yapılandırmayı veya günlükleri kontrol edin.",

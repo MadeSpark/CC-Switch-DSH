@@ -1,5 +1,12 @@
 import { useTranslation } from "react-i18next";
-import { Layers, Plug, Route, Settings2, Shuffle } from "lucide-react";
+import {
+  Layers,
+  Plug,
+  Route,
+  Settings2,
+  Shuffle,
+  type LucideIcon,
+} from "lucide-react";
 import type { AppMode } from "@/types/proxy";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
@@ -45,6 +52,15 @@ interface ModeTabsProps {
   onView: (mode: AppMode) => void;
   /** 状态行：「前导 + 值」，空间不够先截前导；值仅在独自超出整栏时才截断 */
   status?: { lead: string; value: string };
+  help?: { title: string; lines: string[] };
+  toggle?: {
+    label: string;
+    icon: LucideIcon;
+    checked: boolean;
+    disabled?: boolean;
+    onChange: (value: boolean) => void;
+  };
+  scope?: string;
   failover?: {
     enabled: boolean;
     disabled?: boolean;
@@ -68,6 +84,9 @@ export function ModeTabs({
   view,
   onView,
   status,
+  help,
+  toggle,
+  scope,
   failover,
   onOpenRouteSettings,
   onOpenStackSettings,
@@ -79,8 +98,13 @@ export function ModeTabs({
     view,
   );
 
+  const ToggleIcon = toggle?.icon;
+
   return (
-    <div className="flex min-h-12 shrink-0 items-center gap-4 px-6 pt-3">
+    <div
+      data-scope={scope}
+      className="flex min-h-12 shrink-0 items-center gap-4 px-6 pt-3"
+    >
       <div
         ref={indicator.ref}
         role="group"
@@ -99,6 +123,7 @@ export function ModeTabs({
           return (
             <button
               key={mode}
+              data-mode={mode}
               type="button"
               aria-pressed={selected}
               onClick={() => onView(mode)}
@@ -132,12 +157,18 @@ export function ModeTabs({
           );
         })}
       </div>
-      <HelpTip title={t("mode.help.title")} className="-ms-2">
-        {modes.map((mode) => (
-          <span key={mode} className="block">
-            {t(`mode.help.${mode}`)}
-          </span>
-        ))}
+      <HelpTip title={help?.title ?? t("mode.help.title")} className="-ms-2">
+        {help
+          ? help.lines.map((line, index) => (
+              <span key={index} className="block">
+                {line}
+              </span>
+            ))
+          : modes.map((mode) => (
+              <span key={mode} className="block">
+                {t(`mode.help.${mode}`)}
+              </span>
+            ))}
       </HelpTip>
 
       {status && (status.lead || status.value) && (
@@ -156,7 +187,24 @@ export function ModeTabs({
         />
       )}
 
-      {failover && (
+      {toggle && ToggleIcon && (
+        <HoverTip content={toggle.label}>
+          <label className="flex shrink-0 cursor-pointer items-center gap-1.5">
+            <ToggleIcon
+              className="h-4 w-4 text-fg-2"
+              strokeWidth={1.5}
+              aria-hidden="true"
+            />
+            <Switch
+              checked={toggle.checked}
+              disabled={toggle.disabled}
+              onCheckedChange={toggle.onChange}
+              aria-label={toggle.label}
+            />
+          </label>
+        </HoverTip>
+      )}
+      {!toggle && failover && (
         <HoverTip content={t("mode.failover")}>
           <label className="flex shrink-0 cursor-pointer items-center gap-1.5">
             <Shuffle

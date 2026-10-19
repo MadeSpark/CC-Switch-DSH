@@ -96,6 +96,7 @@ import { UsagePage } from "@/components/usage/UsagePage";
 import { EnvWarningBanner } from "@/components/env/EnvWarningBanner";
 import { SwitchModePanel } from "@/components/providers/mode/SwitchModePanel";
 import { DshRelayPanel } from "@/components/providers/DshRelayPanel";
+import { DshModeBar } from "@/components/providers/DshModeBar";
 import { proxyApi } from "@/lib/api/proxy";
 import type { AppMode, StartupAttachFailure } from "@/types/proxy";
 import UsageScriptModal from "@/components/UsageScriptModal";
@@ -359,41 +360,6 @@ function App() {
             translatePiProviderMutationError(detail, t) || detail || undefined,
           closeButton: true,
         },
-      );
-    }
-  };
-
-  const handleSetDshDefaultModel = async (
-    provider: Provider,
-    modelId?: string,
-  ) => {
-    const config = provider.settingsConfig as {
-      models?: Array<{ id?: string } | string>;
-    };
-    const firstModel = config.models?.[0];
-    const resolved =
-      modelId ?? (typeof firstModel === "string" ? firstModel : firstModel?.id);
-    if (!resolved) {
-      toast.error(
-        t("dsh.provider.noModels", {
-          defaultValue: "该供应商没有配置模型",
-        }),
-      );
-      return;
-    }
-    try {
-      await dshApi.setCurrentModel(provider.id, resolved);
-      await invalidateDshProviderCaches(queryClient);
-      toast.success(
-        t("dsh.provider.defaultSet", { defaultValue: "已设为 DSH 默认模型" }),
-        { closeButton: true },
-      );
-    } catch (error) {
-      toast.error(
-        t("dsh.provider.defaultFailed", {
-          defaultValue: "设置 DSH 默认模型失败",
-        }),
-        { description: extractErrorMessage(error), closeButton: true },
       );
     }
   };
@@ -1266,8 +1232,8 @@ function App() {
     />
   );
 
-  // OpenClaw / Hermes 没有模式 tab，那一行放它们自己的页面导航。
-  // 换整块内容的是页面导航，用下划线页签；分段控件只留给模式和页内筛选。
+  // OpenClaw / Hermes 用下划线页签做页面导航。
+  // DSH 那一行是两个连接模式（直連 / 路由），所以按模式用分段控件。
   const renderAppSegments = () => {
     if (activeApp === "openclaw") {
       return (
@@ -1305,18 +1271,11 @@ function App() {
     // DeepSeek Harness 跟 Claude Code 一样：直连（原生供应商）/ 路由（CC Switch 中转）
     if (activeApp === "deepseek-harness") {
       return (
-        <div className="shrink-0 px-6 pt-2">
-          <PageTabs
-            aria-label={APP_DISPLAY_NAME["deepseek-harness"]}
-            idPrefix="dsh-page"
-            value={currentView}
-            onValueChange={(view) => setCurrentView(view)}
-            items={[
-              { value: "providers", label: t("dshRelay.direct") },
-              { value: "dshRelay", label: t("settings.tabProxy") },
-            ]}
-          />
-        </div>
+        <DshModeBar
+          providers={Object.values(providers)}
+          view={currentView === "dshRelay" ? "dshRelay" : "providers"}
+          onViewChange={(view) => setCurrentView(view)}
+        />
       );
     }
     return null;
@@ -1407,12 +1366,9 @@ function App() {
               activeApp === "openclaw"
                 ? (provider, modelId) =>
                     void setAsDefaultModel(provider, modelId)
-                : activeApp === "deepseek-harness"
-                  ? (provider, modelId) =>
-                      void handleSetDshDefaultModel(provider, modelId)
-                  : activeApp === "hermes"
-                    ? (provider) => void switchProvider(provider)
-                    : undefined
+                : activeApp === "hermes"
+                  ? (provider) => void switchProvider(provider)
+                  : undefined
             }
           />
         </div>

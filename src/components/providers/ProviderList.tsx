@@ -362,27 +362,6 @@ export function ProviderList({
               model: dshCurrentState.currentModel,
             }
           : null,
-      dshModels: (provider) => {
-        if (appId !== "deepseek-harness") return [];
-        const models = (provider.settingsConfig as Record<string, unknown>)
-          ?.models;
-        if (!Array.isArray(models)) return [];
-        return models
-          .map((model) => {
-            if (typeof model === "string") return { id: model };
-            if (!model || typeof model !== "object") return null;
-            const record = model as Record<string, unknown>;
-            const id = typeof record.id === "string" ? record.id.trim() : "";
-            if (!id) return null;
-            return {
-              id,
-              name: typeof record.name === "string" ? record.name : undefined,
-            };
-          })
-          .filter(
-            (model): model is { id: string; name?: string } => model !== null,
-          );
-      },
       isHermesManaged: (provider) =>
         isHermesReadOnlyProvider(provider.settingsConfig),
       piStateUnavailable: appId === "pi" && !isPiStateReady,

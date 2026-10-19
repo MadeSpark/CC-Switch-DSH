@@ -1236,16 +1236,6 @@
       "templateRestored": "~/.pi/agent/prompts/{{slug}}.md を書き戻しました"
     }
   },
-  "dsh": {
-    "provider": {
-      "enabled": "DSH で有効化しました",
-      "removed": "DSH から削除しました",
-      "noModels": "このプロバイダーには設定済みのモデルがありません",
-      "defaultSet": "DSH のデフォルトモデルに設定しました",
-      "defaultFailed": "DSH のデフォルトモデルを設定できませんでした",
-      "selectDefaultModel": "デフォルトモデルを選択"
-    }
-  },
   "deepseekHarness": {
     "providerKey": "Provider Key",
     "providerKeyRequired": "Provider Key を入力してください",
@@ -4958,6 +4948,11 @@
     "relayLabel": "DSH のリクエストを CC Switch 経由で中継する",
     "relayDescription": "有効にすると、DSH の各プロバイダーの API ベース URL が CC Switch のローカル中継 URL に書き換えられます。無効にすると元の直接 URL にすぐ戻ります。",
     "relayHelp": "中継 URL は通常 http://127.0.0.1:15721 です。CC Switch を終了すると中継は無効になり、自動復元が切っていると DSH は接続できなくなります。手動で直接 URL に戻す必要があります。",
+    "help": {
+      "title": "直接接続とルーティングの違い",
+      "direct": "直接接続：DSH が選択したプロバイダーへ直接接続します。CC Switch はリクエストに関与しません。",
+      "route": "ルーティング：DSH のリクエストはいったん本機の CC Switch に送られ、そこからプロバイダーへ転送されます。トークン消費はここで一元計測できます。"
+    },
     "relayEnabled": "DSH 中継を有効にしました。API URL をローカル中継に切り替えました",
     "relayDisabled": "DSH 中継を無効にしました。API URL を直接接続に戻しました",
     "relayFailed": "DSH 中継の切り替えに失敗しました: {{detail}}",
@@ -4978,6 +4973,9 @@
     "baseUrlLabel": "現在のアドレス",
     "baseUrlUnknown": "未起動",
     "baseUrlNotRelayed": "リレー未使用",
+    "modeStatus": {
+      "routeValue": "{{count}} 社のプロバイダー"
+    },
     "providersTitle": "プロバイダーのアドレス",
     "noProviders": "中継が有効になると、各プロバイダーのアドレスがここに表示されます。",
     "noProvidersAttached": "リレーは有効ですが、provider のアドレスが書き換えられていません。DSH に有効な provider 設定がない可能性があります。設定かログを確認してください。",
