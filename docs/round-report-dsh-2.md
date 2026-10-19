@@ -314,6 +314,7 @@ dsh.6 这部分也解释得通：它只在「被打断的那一次」丢地址�
 
 ### 8. 验证后现场状态
 
+- 交付提交：`760c635`（`personal-6reqs`），已推送到 `dsh/main`（[MadeSpark/CC-Switch-DSH](https://github.com/MadeSpark/CC-Switch-DSH)）。
 - `cordis.patch.yml`：13,300 B、0 条 `/dsh/` 地址，SHA256 `3F27C3BA9EF52F7FFEFE92956460D37641D7C9B6C8B94FB03727E86BDDF8ABC4`。
 - 侧车 `dsh_relay_state.json`：`attached=false`，5 条原始地址台账（`relayBaseUrl=null`、`relayed=false`）。
 - `settings.json`：`dshRelayEnabled=false`（以后启动不再自动接管）、`dshRestoreOnExit=true`。
