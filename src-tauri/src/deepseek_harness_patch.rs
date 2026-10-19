@@ -144,7 +144,74 @@ pub fn write_entry_config(
         return Ok(());
     }
     backup(path, &text);
-    crate::config::write_text_file(path, &updated)
+    write_patch_text(path, &updated)
+}
+
+/// Same as [`crate::config::write_text_file`], but survives the Harness reading the file.
+///
+/// The Harness keeps a `chokidar` watcher on the patch layer: while it is inside its
+/// `awaitWriteFinish` window it holds the file open, and on Windows `ReplaceFileW` then fails with
+/// `ERROR_UNABLE_TO_REMOVE_REPLACED (1175)` / `ERROR_SHARING_VIOLATION (32)` /
+/// `ERROR_ACCESS_DENIED (5)`. That is a race, not a permission problem, so retry with a short
+/// backoff; if it still will not replace, fall back to rewriting the file in place, which never
+/// conflicts with readers. Losing atomicity here is the lesser evil: the alternative is leaving a
+/// provider pointed at a relay port that does not exist any more.
+fn write_patch_text(path: &Path, text: &str) -> Result<(), AppError> {
+    let mut last_error: Option<AppError> = None;
+    for attempt in 0..8u64 {
+        if attempt > 0 {
+            std::thread::sleep(std::time::Duration::from_millis(20 * attempt));
+        }
+        match crate::config::write_text_file(path, text) {
+            Ok(()) => return Ok(()),
+            Err(error) if is_transient_share_violation(&error) => last_error = Some(error),
+            Err(error) => return Err(error),
+        }
+    }
+    log::warn!(
+        "DeepSeek Harness: replacing {} kept failing (the Harness is probably reading it), rewriting in place: {}",
+        path.display(),
+        last_error
+            .as_ref()
+            .map(ToString::to_string)
+            .unwrap_or_default()
+    );
+    write_in_place(path, text).map_err(|error| match &last_error {
+        Some(previous) => {
+            AppError::Config(format!("{previous}; in-place rewrite failed too: {error}"))
+        }
+        None => error,
+    })
+}
+
+/// Truncate + write through an existing handle. Non-atomic on purpose: it only runs after the
+/// atomic path proved unusable, and it is the only writer that always succeeds while the file is
+/// merely being read.
+fn write_in_place(path: &Path, text: &str) -> Result<(), AppError> {
+    use std::io::Write;
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .truncate(true)
+        .open(path)
+        .map_err(|error| AppError::io(path, error))?;
+    file.write_all(text.as_bytes())
+        .and_then(|_| file.flush())
+        .and_then(|_| file.sync_all())
+        .map_err(|error| AppError::io(path, error))
+}
+
+/// Whether an atomic-replace failure is the "someone else has it open" kind.
+fn is_transient_share_violation(error: &AppError) -> bool {
+    let source = match error {
+        AppError::Io { source, .. } | AppError::IoContext { source, .. } => source,
+        _ => return false,
+    };
+    // 5 ACCESS_DENIED / 32 SHARING_VIOLATION / 33 LOCK_VIOLATION /
+    // 1175 UNABLE_TO_REMOVE_REPLACED / 1176 UNABLE_TO_MOVE_REPLACEMENT / 1177 UNABLE_TO_MOVE_REPLACEMENT_2
+    matches!(
+        source.raw_os_error(),
+        Some(5 | 32 | 33 | 1175 | 1176 | 1177)
+    ) || source.kind() == std::io::ErrorKind::PermissionDenied
 }
 
 /// Read the `config:` object of one entry.
@@ -173,8 +240,15 @@ pub fn remove_entry(path: &Path, entry_id: &str) -> Result<bool, AppError> {
         ))
     })?;
     backup(path, &text);
-    crate::config::write_text_file(path, &updated)?;
+    write_patch_text(path, &updated)?;
     Ok(true)
+}
+
+/// Where [`backup`] keeps the previous version of `path`.
+pub fn backup_path(path: &Path) -> PathBuf {
+    let mut backup = path.as_os_str().to_owned();
+    backup.push(BACKUP_SUFFIX);
+    PathBuf::from(backup)
 }
 
 fn read_text_or_template(path: &Path) -> Result<String, AppError> {
@@ -188,9 +262,7 @@ fn backup(path: &Path, previous: &str) {
     if previous.trim().is_empty() {
         return;
     }
-    let mut backup_path = path.as_os_str().to_owned();
-    backup_path.push(BACKUP_SUFFIX);
-    let backup_path = PathBuf::from(backup_path);
+    let backup_path = backup_path(path);
     if fs::write(&backup_path, previous).is_err() {
         log::warn!(
             "DeepSeek Harness: could not back up {} to {}",

@@ -13,7 +13,7 @@ See [DSH Native Architecture](docs/architecture/dsh-native.md) for ownership bou
 ## DeepSeek Harness 集成（个人分支新增）
 
 - **DSH token 消耗统计**：导入 `~/.dsh/sessions/**/session.v4.jsonl.zstd` 中的会话用量，写入统一用量统计，并按文件游标与记录 ID 去重。详见 [DSH token 统计](docs/DSH-TOKEN-USAGE.md)。
-- **DSH 中转与退出还原**：DeepSeek Harness 应用页顶部是 `直連 | 路由` 分段控件（Claude Code 同款：`?` 说明、生效状态行、右侧快捷开关）；在「路由」里开启后，可将 provider 的 `baseURL` 指向 CC Switch 本机 `/dsh/<providerId>/` 路由，并在用户主动退出 CCS 时恢复原始 API 地址。详见 [DSH 中转](docs/DSH-RELAY.md)。
+- **DSH 中转与退出还原**：DeepSeek Harness 应用页顶部是 `直連 | 路由` 分段控件（Claude Code 同款：`?` 说明、生效状态行）；两个分段只切视图、点击不写配置，切换中转由列表上方的提示条按钮（「開始路由」/「回到直連」）完成，已接管的 provider 在列表里显示「路由中」徽标，「路由設定」齿轮 sheet 里是退出还原开关与地址映射。中转生效后，provider 的 `baseURL` 指向 CC Switch 本机 `/dsh/<providerId>/` 路由，并在用户主动退出 CCS 时恢复原始 API 地址。改 `cordis.patch.yml` 时按退避重试 + 原地重写扛住文件占用，写完回读核对；原始地址多级兜底，真没换回来时界面会明说而不是报成功。详见 [DSH 中转](docs/DSH-RELAY.md)。
 - **供应商列表只做加入/移除**：DSH 与 OpenCode 一样是加法式应用，供应商卡上只有「加入 / 移除」，没有「設為預設」；当前生效的供应商仍以只读标记（`目前` + 模型 chip）显示，且不允许移除。
 - **模型字段就地编辑**：DSH 的模型参数（模型 ID、显示名称、上下文窗口、推理等级）都在模型行里原地编辑，对齐 OpenCode 的纯内联字段；全局「设置 → 模型预设」页面与 Codex / Claude Code 的预设功能仍在。详见 [DSH 模型字段与推理等级](docs/DSH-MODEL-PRESETS.md)。
 - **模型级推理等级**：点开推理等级下拉，多选英文档位（`off/minimal/low/medium/high/xhigh/max`），右侧灰字显示实际发送值；也可套用模型族推荐预设或一键清除。操作说明见 [DSH 模型字段与推理等级](docs/DSH-MODEL-PRESETS.md)。

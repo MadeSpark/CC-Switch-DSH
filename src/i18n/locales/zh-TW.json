@@ -4946,9 +4946,10 @@
     }
   },
   "dshRelay": {
-    "relayLabel": "使用 CC Switch 中轉 DSH 請求",
     "relayDescription": "開啟後，DSH 各 provider 的 API 位址會被改寫為 CC Switch 的本機中轉位址；關閉則立即還原為原始直連位址。",
-    "relayHelp": "中轉位址通常是 http://127.0.0.1:15721。退出 CC Switch 後中轉即失效：若關閉自動還原，DSH 會連不上，需要手動改回直連位址。",
+    "settingsTitle": "路由設定",
+    "directNoticeHint": "關閉後，API 位址會還原為原始直連位址，請求不再經過 CC Switch。",
+    "relayHelp": "中轉位址通常是 http://127.0.0.1:15721。退出 CC Switch 後中轉即失效：若關閉自動還原，DSH 會連不上，直到下次啟動 CC Switch 時自動修復。",
     "help": {
       "title": "直連與路由的差別",
       "direct": "直連：DSH 直接連線所選供應商，CC Switch 不經手任何請求。",
@@ -4957,6 +4958,7 @@
     "relayEnabled": "已開啟 DSH 中轉，API 位址已切到本機中轉",
     "relayDisabled": "已關閉 DSH 中轉，API 位址已還原為直連",
     "relayFailed": "切換 DSH 中轉失敗：{{detail}}",
+    "restoreIncomplete": "{{count}} 個 provider 的位址還沒換回原始直連位址，DSH 仍在走本機中轉。下次啟動 CC Switch 會自動重試。",
     "restoreLabel": "退出 CC Switch 時自動還原直連位址",
     "restoreDescription": "退出 CC Switch 後本機中轉不再可用，開啟此項會在退出前把 DSH 的 API 位址切回原始直連位址。",
     "restoreHint": "如果退出或當機前來不及還原，下次啟動 CC Switch 會自動修復；若接管開關仍開著，則會依目前連接埠重新接管。",

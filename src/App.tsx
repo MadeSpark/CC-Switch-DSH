@@ -95,7 +95,7 @@ import {
 import { UsagePage } from "@/components/usage/UsagePage";
 import { EnvWarningBanner } from "@/components/env/EnvWarningBanner";
 import { SwitchModePanel } from "@/components/providers/mode/SwitchModePanel";
-import { DshRelayPanel } from "@/components/providers/DshRelayPanel";
+import { DshRelayNotice } from "@/components/providers/DshRelayNotice";
 import { DshModeBar } from "@/components/providers/DshModeBar";
 import { proxyApi } from "@/lib/api/proxy";
 import type { AppMode, StartupAttachFailure } from "@/types/proxy";
@@ -1158,6 +1158,10 @@ function App() {
     </DropdownMenu>
   );
 
+  const providerListView =
+    currentView === "providers" ||
+    (activeApp === "deepseek-harness" && currentView === "dshRelay");
+
   const appPageName =
     currentView === "workspace"
       ? t("appPage.workspace")
@@ -1196,26 +1200,25 @@ function App() {
               <ExternalLink className="h-3.5 w-3.5" />
             </Button>
           )}
-          {currentView === "providers" &&
-            (settingsData?.showProviderSearch ?? true) && (
-              <HoverTip
-                content={t("provider.searchButtonTip", {
-                  shortcut: isMac() ? "⌘F" : "Ctrl+F",
-                })}
+          {providerListView && (settingsData?.showProviderSearch ?? true) && (
+            <HoverTip
+              content={t("provider.searchButtonTip", {
+                shortcut: isMac() ? "⌘F" : "Ctrl+F",
+              })}
+            >
+              <Button
+                variant="quiet"
+                size="icon-compact"
+                className="h-8 w-8"
+                aria-label={t("provider.searchAriaLabel")}
+                aria-pressed={providerSearchOpen}
+                onClick={() => setProviderSearchOpen((open) => !open)}
               >
-                <Button
-                  variant="quiet"
-                  size="icon-compact"
-                  className="h-8 w-8"
-                  aria-label={t("provider.searchAriaLabel")}
-                  aria-pressed={providerSearchOpen}
-                  onClick={() => setProviderSearchOpen((open) => !open)}
-                >
-                  <Search className="h-4 w-4" />
-                </Button>
-              </HoverTip>
-            )}
-          {currentView === "providers" && (
+                <Search className="h-4 w-4" />
+              </Button>
+            </HoverTip>
+          )}
+          {providerListView && (
             <Button
               variant="solid"
               size="regular"
@@ -1335,8 +1338,16 @@ function App() {
         className="min-h-0 flex-1 overflow-y-auto scroll-stable overflow-x-hidden px-6 pb-12 pt-4"
       >
         <div className="space-y-4">
+          {activeApp === "deepseek-harness" && (
+            <DshRelayNotice
+              view={currentView === "dshRelay" ? "route" : "direct"}
+            />
+          )}
           <ProviderList
             {...listCallbacks}
+            dshRelayView={
+              activeApp === "deepseek-harness" && currentView === "dshRelay"
+            }
             providers={providers}
             currentProviderId={currentProviderId}
             appId={activeApp}
@@ -1426,16 +1437,7 @@ function App() {
             </div>
           );
         case "dshRelay":
-          return (
-            <div
-              id="main-content"
-              className="min-h-0 flex-1 overflow-y-auto scroll-stable"
-            >
-              <div className="px-6 pb-10 pt-4">
-                <DshRelayPanel />
-              </div>
-            </div>
-          );
+          return renderProviderList();
         default:
           return renderProviderList();
       }

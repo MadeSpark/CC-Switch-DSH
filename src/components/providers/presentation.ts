@@ -654,6 +654,8 @@ export interface AdditiveInput {
   isHermesManaged?: (provider: Provider) => boolean;
   /** DSH：原生配置当前供应商和当前模型 */
   dshCurrent?: { providerId: string | null; model: string | null } | null;
+  /** DSH 路由视图：已被本机中转接管的 provider.id（卡片显示「路由中」） */
+  dshRelay?: { providerIds: string[] } | null;
   /** Pi：读不到当前配置时一律不能改 */
   piStateUnavailable?: boolean;
   actions: {
@@ -759,14 +761,22 @@ export function buildAdditiveSections(input: AdditiveInput): ProviderSection[] {
     const buttons: CardButton[] = [];
     let status: CardPresentation["status"];
     let isDefault = false;
+    /** DSH 路由视图：这一家已被本机中转接管（绿卡「路由中」） */
+    let relayed = false;
     let removeReason: string | undefined = piBlocked;
 
     // DSH 是加法式（additive）应用，和 OpenCode 一样只提供「加入 / 移除」：
     // 当前生效的供应商由 DSH 自己的配置决定，卡片上只做只读展示。
     if (app === "deepseek-harness") {
+      relayed = input.dshRelay?.providerIds.includes(p.id) ?? false;
       isDefault = input.dshCurrent?.providerId === p.id;
-      if (isDefault) {
+      if (relayed) {
+        // 和 Claude Code 的路由视图共用同一个状态：绿点 + 绿卡
+        status = { label: t("providerCard.status.routing"), dot: "route" };
+      } else if (isDefault) {
         status = { label: t("providerCard.status.current"), dot: "muted" };
+      }
+      if (isDefault) {
         const model = input.dshCurrent?.model?.trim();
         if (model) {
           chips.push({
@@ -841,7 +851,8 @@ export function buildAdditiveSections(input: AdditiveInput): ProviderSection[] {
     added.push({
       provider: p,
       presentation: {
-        tone: isDefault ? "neutral" : undefined,
+        // 路由视图里已接管的那家优先画绿卡，其余保持原来的灰底规则
+        tone: relayed ? "route" : isDefault ? "neutral" : undefined,
         status,
         chips,
         dim: managed,

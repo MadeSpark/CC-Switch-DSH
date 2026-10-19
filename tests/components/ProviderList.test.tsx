@@ -1009,6 +1009,88 @@ describe("ProviderList Component", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("marks relayed DSH providers as routing only in the relay view", async () => {
+    const relayed = createProvider({ id: "spacetimeai", name: "Spacetime" });
+    const plain = createProvider({ id: "plain-dsh", name: "Plain" });
+    useDragSortMock.mockReturnValue({
+      sortedProviders: [relayed, plain],
+      sensors: [],
+      handleDragEnd: vi.fn(),
+    });
+    server.use(
+      http.post(`${TAURI_ENDPOINT}/get_dsh_current_state`, () =>
+        HttpResponse.json({
+          providerIds: [relayed.id, plain.id],
+          currentProviderId: null,
+          currentModel: null,
+        }),
+      ),
+      http.post(`${TAURI_ENDPOINT}/dsh_relay_status`, () =>
+        HttpResponse.json({
+          relayEnabled: true,
+          restoreOnExit: false,
+          attached: true,
+          baseUrl: "http://127.0.0.1:15721",
+          providers: [
+            {
+              providerId: relayed.id,
+              name: relayed.name,
+              originalBaseUrl: "https://api.example.com",
+              relayBaseUrl: "http://127.0.0.1:15721/dsh/spacetimeai",
+              relayed: true,
+            },
+            {
+              providerId: plain.id,
+              name: plain.name,
+              originalBaseUrl: "https://api.example.com",
+              relayBaseUrl: "http://127.0.0.1:15721/dsh/plain-dsh",
+              relayed: false,
+            },
+          ],
+        }),
+      ),
+    );
+
+    const props = {
+      providers: { [relayed.id]: relayed, [plain.id]: plain },
+      currentProviderId: "",
+      appId: "deepseek-harness" as const,
+      onSwitch: vi.fn(),
+      onEdit: vi.fn(),
+      onDelete: vi.fn(),
+      onDuplicate: vi.fn(),
+      onOpenWebsite: vi.fn(),
+    };
+    const relayView = renderWithQueryClient(
+      <ProviderList {...props} dshRelayView />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("status-spacetimeai")).toHaveTextContent(
+        "providerCard.status.routing",
+      );
+      expect(lastProps("spacetimeai").presentation.tone).toBe("route");
+    });
+    // 没被接管的那家不绿
+    expect(screen.queryByTestId("status-plain-dsh")).not.toBeInTheDocument();
+    expect(lastProps("plain-dsh").presentation.tone).toBeUndefined();
+
+    relayView.unmount();
+    // 丢掉上一棵树记录的 props，不然下面的断言会读到旧卡片的 tone
+    providerCardRenderSpy.mockClear();
+
+    renderWithQueryClient(<ProviderList {...props} />);
+
+    await waitFor(() => {
+      expect(lastProps("spacetimeai")).toBeDefined();
+    });
+    expect(
+      screen.queryByText("providerCard.status.routing"),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByTestId("status-spacetimeai")).not.toBeInTheDocument();
+    expect(lastProps("spacetimeai").presentation.tone).toBeUndefined();
+  });
+
   it("does not tell MiniMax Code users to click a missing import button", async () => {
     renderWithQueryClient(
       <ProviderList

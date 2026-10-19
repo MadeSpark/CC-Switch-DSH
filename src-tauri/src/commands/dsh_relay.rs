@@ -48,14 +48,14 @@ pub async fn dsh_set_relay(
 ) -> Result<DshRelayStatus, String> {
     if !enabled {
         settings::set_dsh_relay_enabled(false).map_err(|error| error.to_string())?;
-        let snapshot = dsh_relay::detach()?;
+        let snapshot = dsh_relay::detach_with(Some(state.db.as_ref()))?;
         return Ok(status_from(snapshot));
     }
 
-    let snapshot = dsh_relay::attach(&state.proxy_service).await?;
+    let snapshot = dsh_relay::attach(&state.proxy_service, Some(state.db.as_ref())).await?;
     if let Err(error) = settings::set_dsh_relay_enabled(true) {
         // 开关没落盘就回滚，避免退出后 DSH 还挂在只会存在于本次进程里的中转地址上。
-        if let Err(rollback) = dsh_relay::detach() {
+        if let Err(rollback) = dsh_relay::detach_with(Some(state.db.as_ref())) {
             log::warn!("[DSH-Relay] 回滚接管失败: {rollback}");
         }
         return Err(format!("保存 DSH 中转开关失败: {error}"));

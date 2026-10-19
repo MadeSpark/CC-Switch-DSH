@@ -5,21 +5,60 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DshModeBar } from "@/components/providers/DshModeBar";
-import type { DshCurrentState, DshRelayStatus } from "@/lib/api/dsh";
-import type { Provider } from "@/types";
+import { DshRelayNotice } from "@/components/providers/DshRelayNotice";
+import type { DshRelayStatus } from "@/lib/api/dsh";
 
-const { invokeMock, toastSuccess, toastError } = vi.hoisted(() => ({
-  invokeMock: vi.fn(),
-  toastSuccess: vi.fn(),
-  toastError: vi.fn(),
+const mocks = vi.hoisted(() => ({
+  relay: undefined as DshRelayStatus | undefined,
+  pending: false,
+  mutateAsync: vi.fn(),
+  restoreAsync: vi.fn(),
+  success: vi.fn(),
+  warning: vi.fn(),
+  error: vi.fn(),
 }));
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke: invokeMock }));
+vi.mock("@/lib/query/dsh", () => ({
+  relayedCount: (status: DshRelayStatus) =>
+    status.providers.filter((provider) => provider.relayed).length,
+  useDshRelayStatus: () => ({
+    data: mocks.relay,
+    refetch: vi.fn(),
+    isLoading: false,
+    isFetching: false,
+  }),
+  useDshCurrentState: () => ({
+    data: { currentProviderId: "gateway", currentModel: "model-a" },
+  }),
+  useSetDshRelay: () => ({
+    mutateAsync: mocks.mutateAsync,
+    isPending: mocks.pending,
+  }),
+  useSetDshRestoreOnExit: () => ({
+    mutateAsync: mocks.restoreAsync,
+    isPending: false,
+  }),
+}));
 vi.mock("sonner", () => ({
-  toast: { success: toastSuccess, error: toastError },
+  toast: {
+    success: mocks.success,
+    warning: mocks.warning,
+    error: mocks.error,
+  },
+}));
+vi.mock("react-i18next", () => ({
+  useTranslation: () => ({
+    t: (key: string) =>
+      (
+        ({
+          "mode.routeSettings": "路由設定",
+          "dshRelay.settingsTitle": "路由設定",
+          "dshRelay.restoreLabel": "退出 CC Switch 時自動還原直連位址",
+        }) as Record<string, string>
+      )[key] ?? key,
+  }),
 }));
 
 const directStatus: DshRelayStatus = {
@@ -44,64 +83,34 @@ const routeStatus: DshRelayStatus = {
     },
   ],
 };
-const currentState: DshCurrentState = {
-  providerIds: ["gateway"],
-  currentProviderId: "gateway",
-  currentModel: "model-a",
-};
 
-function mockState(relay = directStatus, current = currentState) {
-  invokeMock.mockImplementation(
-    (command: string, args?: { enabled: boolean }) => {
-      if (command === "dsh_relay_status") return Promise.resolve(relay);
-      if (command === "get_dsh_current_state") return Promise.resolve(current);
-      if (command === "dsh_set_relay") {
-        return Promise.resolve(args?.enabled ? routeStatus : directStatus);
-      }
-      return Promise.reject(new Error(`Unexpected command: ${command}`));
-    },
-  );
-}
+beforeEach(() => {
+  mocks.relay = directStatus;
+  mocks.pending = false;
+  mocks.mutateAsync.mockReset().mockResolvedValue(routeStatus);
+  mocks.restoreAsync.mockReset().mockResolvedValue(routeStatus);
+  mocks.success.mockReset();
+  mocks.warning.mockReset();
+  mocks.error.mockReset();
+});
 
-function renderBar(
-  view: "providers" | "dshRelay" = "providers",
-  providers?: Provider[],
-) {
-  const client = new QueryClient({
-    defaultOptions: { queries: { retry: false } },
-  });
+function renderBar(view: "providers" | "dshRelay" = "providers") {
   const onViewChange = vi.fn();
-  const element = (nextView: "providers" | "dshRelay") => (
-    <QueryClientProvider client={client}>
-      <DshModeBar
-        providers={providers}
-        view={nextView}
-        onViewChange={onViewChange}
-      />
-    </QueryClientProvider>
+  const element = (next: "providers" | "dshRelay") => (
+    <DshModeBar view={next} onViewChange={onViewChange} />
   );
   const result = render(element(view));
   return {
     ...result,
     onViewChange,
-    changeView: (nextView: "providers" | "dshRelay") =>
-      result.rerender(element(nextView)),
+    changeView: (next: "providers" | "dshRelay") =>
+      result.rerender(element(next)),
   };
 }
 
-beforeEach(() => {
-  invokeMock.mockReset();
-  toastSuccess.mockReset();
-  toastError.mockReset();
-  mockState();
-});
-
 describe("DshModeBar", () => {
-  it("renders two segmented buttons with view selection and stable scope markers", () => {
-    const { container, changeView } = renderBar();
-    expect(
-      container.querySelector('[data-scope="dsh-mode"]'),
-    ).toBeInTheDocument();
+  it("switches the viewed pill without changing the connection mode", () => {
+    const { onViewChange, changeView } = renderBar();
     const group = screen.getByRole("group", { name: "mode.tabsLabel" });
     const direct = within(group).getByRole("button", {
       name: /mode.names.direct/,
@@ -110,137 +119,135 @@ describe("DshModeBar", () => {
       name: /mode.names.route/,
     });
     expect(within(group).getAllByRole("button")).toHaveLength(2);
-    expect(direct).toHaveAttribute("data-mode", "direct");
-    expect(route).toHaveAttribute("data-mode", "route");
     expect(direct).toHaveAttribute("aria-pressed", "true");
     expect(route).toHaveAttribute("aria-pressed", "false");
-    changeView("dshRelay");
-    expect(direct).toHaveAttribute("aria-pressed", "false");
-    expect(route).toHaveAttribute("aria-pressed", "true");
-    expect(
-      screen.queryByRole("button", { name: "mode.routeSettings" }),
-    ).not.toBeInTheDocument();
-  });
-
-  it("changes the requested page when a segment is clicked", () => {
-    const { onViewChange } = renderBar();
-    fireEvent.click(screen.getByRole("button", { name: /mode.names.route/ }));
+    fireEvent.click(route);
     expect(onViewChange).toHaveBeenCalledWith("dshRelay");
-    fireEvent.click(screen.getByRole("button", { name: /mode.names.direct/ }));
-    expect(onViewChange).toHaveBeenLastCalledWith("providers");
-  });
-
-  it("marks attached routing active independently of the view and shows status only in that view", async () => {
-    mockState(routeStatus);
-    const { changeView } = renderBar();
-    const route = screen.getByRole("button", { name: /mode.names.route/ });
-    await waitFor(() => expect(route).toHaveClass("text-route-text"));
-    expect(
-      within(route).getByRole("img", { name: "mode.active" }),
-    ).toBeInTheDocument();
-    expect(route).toHaveAttribute("aria-pressed", "false");
-    expect(screen.queryByText("mode.status.routeLead")).not.toBeInTheDocument();
     changeView("dshRelay");
     expect(route).toHaveAttribute("aria-pressed", "true");
+    expect(direct).toHaveAttribute("aria-pressed", "false");
+    expect(mocks.mutateAsync).not.toHaveBeenCalled();
+  });
+
+  it("has stable mode markers and no switch in the mode row", () => {
+    const { container } = renderBar();
+    const row = container.querySelector('[data-scope="dsh-mode"]');
+    expect(row).toBeInTheDocument();
+    expect(row?.querySelector('[data-mode="direct"]')).toBeInTheDocument();
+    expect(row?.querySelector('[data-mode="route"]')).toBeInTheDocument();
+    expect(
+      container.querySelector('[data-scope="dsh-mode"] [role="switch"]'),
+    ).toBeNull();
+  });
+
+  it("shows active-route status only while viewing route", () => {
+    mocks.relay = routeStatus;
+    const { changeView } = renderBar("dshRelay");
     expect(screen.getByText("mode.status.routeLead")).toBeInTheDocument();
     expect(screen.getByText("→ Gateway")).toBeInTheDocument();
+    changeView("providers");
+    expect(screen.queryByText("mode.status.routeLead")).not.toBeInTheDocument();
+    const route = screen.getByRole("button", { name: /mode.names.route/ });
+    expect(route).toHaveClass("text-route-text");
+    expect(route).toHaveAttribute("aria-pressed", "false");
   });
 
-  it("shows the direct provider and model using its display name", async () => {
-    renderBar("providers", [
-      { id: "gateway", name: "Company Gateway", settingsConfig: {} },
-    ]);
-    expect(
-      await screen.findByText("Company Gateway · model-a"),
-    ).toBeInTheDocument();
-    expect(screen.getByText("mode.status.directLead")).toBeInTheDocument();
-  });
-
-  it("falls back to the provider id and omits a value when there is no current provider", async () => {
-    const { unmount } = renderBar();
-    expect(await screen.findByText("gateway · model-a")).toBeInTheDocument();
-    unmount();
-    mockState(directStatus, { ...currentState, currentProviderId: null });
+  it("does not offer routing settings in detached direct view", () => {
     renderBar();
-    await waitFor(() => expect(screen.getByRole("switch")).toBeEnabled());
-    expect(screen.getByText("mode.status.directLead")).toBeInTheDocument();
-    expect(screen.queryByText(/model-a/)).not.toBeInTheDocument();
-  });
-
-  it("uses the count label for multiple relayed providers and ids for unnamed providers", async () => {
-    mockState({
-      ...routeStatus,
-      providers: [
-        ...routeStatus.providers,
-        { ...routeStatus.providers[0], providerId: "other", name: "Other" },
-      ],
-    });
-    const { unmount } = renderBar("dshRelay");
     expect(
-      await screen.findByText("→ dshRelay.modeStatus.routeValue"),
-    ).toBeInTheDocument();
-    unmount();
-    mockState({
-      ...routeStatus,
-      providers: [{ ...routeStatus.providers[0], name: "" }],
-    });
-    renderBar("dshRelay");
-    expect(await screen.findByText("→ gateway")).toBeInTheDocument();
+      screen.queryByRole("button", { name: "路由設定" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
-  it("enables routing through the shortcut switch and reports success", async () => {
-    renderBar();
-    const toggle = screen.getByRole("switch", { name: "dshRelay.relayLabel" });
-    await waitFor(() => expect(toggle).toBeEnabled());
-    fireEvent.click(toggle);
-    await waitFor(() =>
-      expect(invokeMock).toHaveBeenCalledWith("dsh_set_relay", {
-        enabled: true,
+  it("opens routing settings and its only restore switch when route is active", () => {
+    mocks.relay = routeStatus;
+    const { container } = renderBar("dshRelay");
+    fireEvent.click(screen.getByRole("button", { name: "路由設定" }));
+    const sheet = screen.getByRole("dialog", { name: "路由設定" });
+    expect(
+      within(sheet).getByRole("heading", { name: "路由設定" }),
+    ).toBeInTheDocument();
+    expect(
+      within(sheet).getByRole("switch", {
+        name: "退出 CC Switch 時自動還原直連位址",
       }),
-    );
-    await waitFor(() =>
-      expect(toastSuccess).toHaveBeenCalledWith("dshRelay.relayEnabled"),
-    );
-    expect(toggle).toBeChecked();
-  });
-
-  it("reports failed mutations and retains the previous switch value", async () => {
-    const logError = vi.spyOn(console, "error").mockImplementation(() => {});
-    invokeMock.mockImplementation((command: string) => {
-      if (command === "dsh_relay_status") return Promise.resolve(directStatus);
-      if (command === "get_dsh_current_state")
-        return Promise.resolve(currentState);
-      return Promise.reject(new Error("relay blocked"));
-    });
-    try {
-      renderBar();
-      const toggle = screen.getByRole("switch");
-      await waitFor(() => expect(toggle).toBeEnabled());
-      fireEvent.click(toggle);
-      await waitFor(() =>
-        expect(toastError).toHaveBeenCalledWith("dshRelay.relayFailed"),
-      );
-      expect(toastSuccess).not.toHaveBeenCalled();
-      expect(toggle).not.toBeChecked();
-    } finally {
-      logError.mockRestore();
-    }
-  });
-
-  it("disables the shortcut when relay status cannot be read", async () => {
-    invokeMock.mockImplementation((command: string) =>
-      command === "get_dsh_current_state"
-        ? Promise.resolve(currentState)
-        : Promise.reject(new Error("unavailable")),
-    );
-    renderBar();
-    await waitFor(() =>
-      expect(invokeMock).toHaveBeenCalledWith("dsh_relay_status"),
-    );
-    expect(screen.getByRole("switch")).toBeDisabled();
+    ).toBeInTheDocument();
+    expect(within(sheet).getAllByRole("switch")).toHaveLength(1);
     expect(
-      screen.getByRole("button", { name: /mode.names.direct/ }),
-    ).toHaveAttribute("aria-pressed", "true");
-    expect(toastError).not.toHaveBeenCalled();
+      container.querySelector('[data-scope="dsh-mode"] [role="switch"]'),
+    ).toBeNull();
+    expect(mocks.mutateAsync).not.toHaveBeenCalled();
+  });
+
+  it("offers DSH-specific question-mark help", () => {
+    renderBar();
+    fireEvent.click(
+      screen.getByRole("button", { name: "dshRelay.help.title" }),
+    );
+    const help = screen.getByRole("tooltip");
+    expect(within(help).getByText("dshRelay.help.direct")).toBeInTheDocument();
+    expect(within(help).getByText("dshRelay.help.route")).toBeInTheDocument();
+  });
+});
+
+describe("DshRelayNotice", () => {
+  it("enables route from its notice without changing it from a pill", async () => {
+    render(<DshRelayNotice view="route" />);
+    expect(screen.getByText("dshRelay.relayDescription")).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: "mode.activate.route" }),
+    );
+    await waitFor(() => expect(mocks.mutateAsync).toHaveBeenCalledWith(true));
+    await waitFor(() =>
+      expect(mocks.success).toHaveBeenCalledWith("dshRelay.relayEnabled"),
+    );
+  });
+
+  it("restores direct mode from its notice", async () => {
+    mocks.relay = routeStatus;
+    mocks.mutateAsync.mockResolvedValue(directStatus);
+    render(<DshRelayNotice view="direct" />);
+    expect(screen.getByText("dshRelay.directNoticeHint")).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: "mode.activate.direct" }),
+    );
+    await waitFor(() => expect(mocks.mutateAsync).toHaveBeenCalledWith(false));
+    await waitFor(() =>
+      expect(mocks.success).toHaveBeenCalledWith("dshRelay.relayDisabled"),
+    );
+  });
+
+  it("does not offer activation for the active view or an unreadable status", () => {
+    const { container, rerender } = render(<DshRelayNotice view="direct" />);
+    expect(container).toBeEmptyDOMElement();
+    mocks.relay = undefined;
+    rerender(<DshRelayNotice view="route" />);
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it("disables activation while a mutation is pending", () => {
+    mocks.pending = true;
+    render(<DshRelayNotice view="route" />);
+    expect(
+      screen.getByRole("button", { name: "mode.activate.route" }),
+    ).toBeDisabled();
+  });
+
+  it("reports activation errors without a success toast", async () => {
+    mocks.mutateAsync.mockRejectedValue(new Error("relay blocked"));
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      render(<DshRelayNotice view="route" />);
+      fireEvent.click(
+        screen.getByRole("button", { name: "mode.activate.route" }),
+      );
+      await waitFor(() =>
+        expect(mocks.error).toHaveBeenCalledWith("dshRelay.relayFailed"),
+      );
+      expect(mocks.success).not.toHaveBeenCalled();
+    } finally {
+      error.mockRestore();
+    }
   });
 });

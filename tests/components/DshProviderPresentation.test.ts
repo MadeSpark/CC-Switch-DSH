@@ -80,4 +80,127 @@ describe("DeepSeek Harness provider presentation", () => {
     availableItem.presentation.buttons[0].onClick();
     expect(add).toHaveBeenCalledWith(available);
   });
+
+  /** 路由视图用例的公共壳：只有「已添加」那组的卡片才带 status / tone。 */
+  function addedItems(input: {
+    providers: Provider[];
+    current?: { providerId: string | null; model: string | null } | null;
+    relay?: { providerIds: string[] };
+  }) {
+    const sections = buildAdditiveSections({
+      app: "deepseek-harness",
+      t: translate,
+      providers: input.providers,
+      isInConfig: () => true,
+      dshCurrent: input.current ?? null,
+      dshRelay: input.relay,
+      actions: {
+        add: vi.fn(),
+        remove: vi.fn(),
+        disableOmo: vi.fn(),
+        setDefault: vi.fn(),
+      },
+    });
+    return sections.find((section) => section.key === "added")!.items;
+  }
+
+  it("marks a relayed current provider as routing and keeps its model chip", () => {
+    const spacetime = provider("spacetimeai", "Spacetime");
+    const items = addedItems({
+      providers: [spacetime],
+      current: { providerId: spacetime.id, model: "gpt-5" },
+      relay: { providerIds: [spacetime.id] },
+    });
+
+    const card = items[0].presentation;
+    expect(card.status?.label).toBe("providerCard.status.routing");
+    expect(card.status?.dot).toBe("route");
+    expect(card.tone).toBe("route");
+    expect(card.chips.map((chip) => chip.key)).toContain("dshCurrentModel");
+    expect(actionKeys(items[0])).toEqual(["remove"]);
+    expect(items[0].presentation.buttons[0].disabledReason).toBe(
+      "providerCard.reason.currentCannotRemove",
+    );
+  });
+
+  it("marks a relayed non-current provider as routing without the model chip", () => {
+    const current = provider("current", "Current");
+    const relayed = provider("relayed", "Relayed");
+    const items = addedItems({
+      providers: [current, relayed],
+      current: { providerId: current.id, model: "current-fast" },
+      relay: { providerIds: [relayed.id] },
+    });
+
+    const relayedCard = items.find(
+      (item) => item.provider.id === relayed.id,
+    )!.presentation;
+    expect(relayedCard.status?.label).toBe("providerCard.status.routing");
+    expect(relayedCard.status?.dot).toBe("route");
+    expect(relayedCard.tone).toBe("route");
+    expect(relayedCard.chips.map((chip) => chip.key)).not.toContain(
+      "dshCurrentModel",
+    );
+
+    // 当前但没被接管的那家仍然是「目前」+ 灰卡
+    const currentCard = items.find(
+      (item) => item.provider.id === current.id,
+    )!.presentation;
+    expect(currentCard.status?.label).toBe("providerCard.status.current");
+    expect(currentCard.tone).toBe("neutral");
+  });
+
+  it("keeps the plain current status when nothing is relayed", () => {
+    const current = provider("current", "Current");
+    const other = provider("other", "Other");
+    const items = addedItems({
+      providers: [current, other],
+      current: { providerId: current.id, model: "current-fast" },
+      relay: { providerIds: [] },
+    });
+
+    const currentCard = items.find(
+      (item) => item.provider.id === current.id,
+    )!.presentation;
+    expect(currentCard.status?.label).toBe("providerCard.status.current");
+    expect(currentCard.status?.dot).toBe("muted");
+    expect(currentCard.tone).toBe("neutral");
+
+    const otherCard = items.find(
+      (item) => item.provider.id === other.id,
+    )!.presentation;
+    expect(otherCard.status).toBeUndefined();
+    expect(otherCard.tone).toBeUndefined();
+  });
+
+  it("matches the old output when dshRelay is not passed", () => {
+    const current = provider("current", "Current");
+    const other = provider("other", "Other");
+    const items = addedItems({
+      providers: [current, other],
+      current: { providerId: current.id, model: "current-fast" },
+    });
+
+    expect(
+      items.map((item) => ({
+        status: item.presentation.status,
+        tone: item.presentation.tone,
+        chips: item.presentation.chips.map((chip) => chip.key),
+        buttons: actionKeys(item),
+      })),
+    ).toEqual([
+      {
+        status: { label: "providerCard.status.current", dot: "muted" },
+        tone: "neutral",
+        chips: ["dshCurrentModel"],
+        buttons: ["remove"],
+      },
+      {
+        status: undefined,
+        tone: undefined,
+        chips: [],
+        buttons: ["remove"],
+      },
+    ]);
+  });
 });

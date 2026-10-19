@@ -47,7 +47,7 @@ import { cn } from "@/lib/utils";
 import { isTextEditableTarget } from "@/utils/domUtils";
 import { extractProviderBaseUrl } from "@/utils/providerConfigUtils";
 import { usePiCurrentState } from "@/lib/query/pi";
-import { useDshCurrentState } from "@/lib/query/dsh";
+import { useDshCurrentState, useDshRelayStatus } from "@/lib/query/dsh";
 import { isHermesReadOnlyProvider } from "@/config/hermesProviderPresets";
 import {
   buildAdditiveSections,
@@ -93,6 +93,8 @@ interface ProviderListProps {
    * 与第一个分组标题同行
    */
   searchSlot?: HTMLElement | null;
+  /** DSH 的路由视图：同一份卡片，但已被本机中转接管的显示「路由中」 */
+  dshRelayView?: boolean;
 }
 
 export function ProviderList({
@@ -116,6 +118,7 @@ export function ProviderList({
   searchOpen,
   onSearchOpenChange,
   searchSlot,
+  dshRelayView,
 }: ProviderListProps) {
   const { t } = useTranslation();
   const { checkProvider, isChecking } = useStreamCheck(appId);
@@ -150,6 +153,9 @@ export function ProviderList({
   } = usePiCurrentState(appId === "pi");
   const { data: dshCurrentState, isPending: isDshCurrentStatePending } =
     useDshCurrentState(appId === "deepseek-harness");
+  const { data: dshRelayStatus } = useDshRelayStatus(
+    appId === "deepseek-harness" && !!dshRelayView,
+  );
   const isPiStateReady = appId !== "pi" || isPiCurrentStateSuccess;
   // 累加式应用要等 live 里有哪些供应商读回来（成功或失败）才知道卡片该进哪个分区；
   // 在那之前按加载中画骨架，不然卡片先全落进「可添加」，读回来再整体搬到「已添加」。
@@ -362,6 +368,14 @@ export function ProviderList({
               model: dshCurrentState.currentModel,
             }
           : null,
+      dshRelay:
+        dshRelayView && dshRelayStatus
+          ? {
+              providerIds: dshRelayStatus.providers
+                .filter((provider) => provider.relayed)
+                .map((provider) => provider.providerId),
+            }
+          : undefined,
       isHermesManaged: (provider) =>
         isHermesReadOnlyProvider(provider.settingsConfig),
       piStateUnavailable: appId === "pi" && !isPiStateReady,
@@ -392,6 +406,8 @@ export function ProviderList({
     currentOmoSlimId,
     hermesModelConfig?.provider,
     dshCurrentState,
+    dshRelayStatus,
+    dshRelayView,
     isPiStateReady,
     onRemoveFromConfig,
     onDelete,

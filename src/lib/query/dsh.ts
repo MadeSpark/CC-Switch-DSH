@@ -52,7 +52,18 @@ function applyRelayStatus(
   queryClient.setQueryData(dshKeys.relayStatus, status);
   // 两个开关同时写进 settings.json，让设置查询过期以免别处读到旧值
   void queryClient.invalidateQueries({ queryKey: ["settings"] });
+  // 开/关中转会改写各 provider 的 baseURL，列表里的地址必须跟着刷新
+  void invalidateDshProviderCaches(queryClient);
 }
+
+/**
+ * 切换后仍有多少 provider 指着中转地址。
+ *
+ * 后端可能只换回了一部分（文件被 Harness 占着等），这时不能对外说「已还原为直连」，
+ * 界面要照实显示还在走中转，并提示下次重试。
+ */
+export const relayedCount = (status: DshRelayStatus): number =>
+  status.providers.filter((provider) => provider.relayed).length;
 
 /** 开/关「使用 CC Switch 中转 DSH 请求」。 */
 export function useSetDshRelay() {

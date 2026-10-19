@@ -1188,8 +1188,9 @@ pub fn run() {
             // 开关还开着就按本次实际监听的端口重新接管。放启动末尾，等端口先定下来。
             {
                 let proxy_service = app_state.proxy_service.clone();
+                let db = app_state.db.clone();
                 tauri::async_runtime::spawn(async move {
-                    crate::services::dsh_relay::heal_on_startup(&proxy_service).await;
+                    crate::services::dsh_relay::heal_on_startup(&proxy_service, &db).await;
                 });
             }
             // 将同一个实例注入到全局状态，避免重复创建导致的不一致
@@ -1934,7 +1935,7 @@ pub fn run() {
 pub async fn cleanup_before_exit(app_handle: &tauri::AppHandle) {
     if let Some(state) = app_handle.try_state::<store::AppState>() {
         crate::mode::controller::detach_all(state.inner()).await;
-        restore_dsh_relay_on_exit();
+        restore_dsh_relay_on_exit(app_handle);
         log::info!("退出清理完成：客户端已指回直连，代理已停止");
     }
 }
@@ -1943,12 +1944,24 @@ pub async fn cleanup_before_exit(app_handle: &tauri::AppHandle) {
 ///
 /// 中转地址只在 CC Switch 活着时有效，所以要在这里恢复；万一恢复失败（文件被占用等）
 /// 只记日志，下次启动自检还会再试一次。
-fn restore_dsh_relay_on_exit() {
+///
+/// 判断「有没有在走中转」看的是**文件里的实际地址**（`is_attached`），不是账本标记：
+/// 账本丢了、文件里还挂着中转地址的历史状态（旧版本踩过）必须在这里也能救回来。
+fn restore_dsh_relay_on_exit(app_handle: &tauri::AppHandle) {
     let (_, restore_on_exit) = crate::settings::get_dsh_relay_flags();
-    if !restore_on_exit || !crate::services::dsh_relay::is_attached() {
+    if !crate::services::dsh_relay::is_attached() {
         return;
     }
-    match crate::services::dsh_relay::detach() {
+    if !restore_on_exit {
+        log::warn!(
+            "退出清理：DSH 仍在走中转，但「退出后自动切回原始地址」是关着的，按用户设置跳过"
+        );
+        return;
+    }
+    let database = app_handle
+        .try_state::<store::AppState>()
+        .map(|state| state.db.clone());
+    match crate::services::dsh_relay::detach_with(database.as_deref()) {
         Ok(_) => log::info!("退出清理：DSH 的 baseURL 已换回原始地址"),
         Err(e) => log::warn!("退出清理：换回 DSH 原始地址失败，留待下次启动自检: {e}"),
     }

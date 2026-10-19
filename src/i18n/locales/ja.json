@@ -4945,9 +4945,10 @@
     }
   },
   "dshRelay": {
-    "relayLabel": "DSH のリクエストを CC Switch 経由で中継する",
     "relayDescription": "有効にすると、DSH の各プロバイダーの API ベース URL が CC Switch のローカル中継 URL に書き換えられます。無効にすると元の直接 URL にすぐ戻ります。",
-    "relayHelp": "中継 URL は通常 http://127.0.0.1:15721 です。CC Switch を終了すると中継は無効になり、自動復元が切っていると DSH は接続できなくなります。手動で直接 URL に戻す必要があります。",
+    "settingsTitle": "ルート設定",
+    "directNoticeHint": "無効にすると API ベース URL が元の直接接続先に戻り、リクエストは CC Switch を通らなくなります。",
+    "relayHelp": "中継 URL は通常 http://127.0.0.1:15721 です。CC Switch を終了すると中継は無効になり、自動復元が切っていると DSH は接続できませんが、次回 CC Switch の起動時に自動で修復されます。",
     "help": {
       "title": "直接接続とルーティングの違い",
       "direct": "直接接続：DSH が選択したプロバイダーへ直接接続します。CC Switch はリクエストに関与しません。",
@@ -4956,6 +4957,7 @@
     "relayEnabled": "DSH 中継を有効にしました。API URL をローカル中継に切り替えました",
     "relayDisabled": "DSH 中継を無効にしました。API URL を直接接続に戻しました",
     "relayFailed": "DSH 中継の切り替えに失敗しました: {{detail}}",
+    "restoreIncomplete": "{{count}} 件の provider のアドレスが元の直接 URL に戻っていません。DSH は引き続きローカル中継を使用します。次回 CC Switch の起動時に自動で再試行します。",
     "restoreLabel": "CC Switch 終了時に直接 URL へ自動で戻す",
     "restoreDescription": "CC Switch の終了後はローカル中継を利用できません。これを有効にすると、終了前に DSH の API URL を元の直接アドレスへ戻します。",
     "restoreHint": "終了やクラッシュで戻せなかった場合も、次回 CC Switch の起動時に自動で修復されます。中継が有効なままなら、現在のポートで改めて中継します。",

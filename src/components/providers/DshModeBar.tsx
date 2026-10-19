@@ -1,14 +1,9 @@
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Waypoints } from "lucide-react";
 import type { Provider } from "@/types";
-import {
-  useDshCurrentState,
-  useDshRelayStatus,
-  useSetDshRelay,
-} from "@/lib/query/dsh";
-import { toast } from "@/lib/toast";
-import { extractErrorMessage } from "@/utils/errorUtils";
+import { useDshCurrentState, useDshRelayStatus } from "@/lib/query/dsh";
 import { ModeTabs } from "./mode/ModeTabs";
+import { DshRelaySheet } from "./DshRelaySheet";
 
 type DshView = "providers" | "dshRelay";
 
@@ -26,7 +21,7 @@ export function DshModeBar({
   const { t } = useTranslation();
   const { data: relay } = useDshRelayStatus();
   const { data: current } = useDshCurrentState();
-  const setRelay = useSetDshRelay();
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const modeView = view === "dshRelay" ? "route" : "direct";
   const active = relay?.attached ? "route" : "direct";
 
@@ -54,41 +49,28 @@ export function DshModeBar({
         ? { lead: t("mode.status.routeLead"), value: `→ ${routeTarget}` }
         : { lead: t("mode.status.directLead"), value: directTarget };
 
-  const handleRelayChange = async (enabled: boolean) => {
-    try {
-      await setRelay.mutateAsync(enabled);
-      toast.success(
-        enabled ? t("dshRelay.relayEnabled") : t("dshRelay.relayDisabled"),
-      );
-    } catch (error) {
-      console.error("[DshModeBar] Failed to toggle DSH relay", error);
-      toast.error(
-        t("dshRelay.relayFailed", { detail: extractErrorMessage(error) }),
-      );
-    }
-  };
-
   return (
-    <ModeTabs
-      modes={["direct", "route"]}
-      active={active}
-      view={modeView}
-      onView={(mode) =>
-        onViewChange(mode === "route" ? "dshRelay" : "providers")
-      }
-      status={status}
-      help={{
-        title: t("dshRelay.help.title"),
-        lines: [t("dshRelay.help.direct"), t("dshRelay.help.route")],
-      }}
-      toggle={{
-        label: t("dshRelay.relayLabel"),
-        icon: Waypoints,
-        checked: Boolean(relay?.relayEnabled),
-        disabled: !relay || setRelay.isPending,
-        onChange: (enabled) => void handleRelayChange(enabled),
-      }}
-      scope="dsh-mode"
-    />
+    <>
+      <ModeTabs
+        modes={["direct", "route"]}
+        active={active}
+        view={modeView}
+        onView={(mode) =>
+          onViewChange(mode === "route" ? "dshRelay" : "providers")
+        }
+        status={status}
+        help={{
+          title: t("dshRelay.help.title"),
+          lines: [t("dshRelay.help.direct"), t("dshRelay.help.route")],
+        }}
+        onOpenRouteSettings={
+          modeView === "route" && active === "route"
+            ? () => setSettingsOpen(true)
+            : undefined
+        }
+        scope="dsh-mode"
+      />
+      <DshRelaySheet open={settingsOpen} onOpenChange={setSettingsOpen} />
+    </>
   );
 }

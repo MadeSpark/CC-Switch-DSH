@@ -1,12 +1,5 @@
 import { useTranslation } from "react-i18next";
-import {
-  Layers,
-  Plug,
-  Route,
-  Settings2,
-  Shuffle,
-  type LucideIcon,
-} from "lucide-react";
+import { Layers, Plug, Route, Settings2, Shuffle } from "lucide-react";
 import type { AppMode } from "@/types/proxy";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
@@ -53,13 +46,6 @@ interface ModeTabsProps {
   /** 状态行：「前导 + 值」，空间不够先截前导；值仅在独自超出整栏时才截断 */
   status?: { lead: string; value: string };
   help?: { title: string; lines: string[] };
-  toggle?: {
-    label: string;
-    icon: LucideIcon;
-    checked: boolean;
-    disabled?: boolean;
-    onChange: (value: boolean) => void;
-  };
   scope?: string;
   failover?: {
     enabled: boolean;
@@ -85,7 +71,6 @@ export function ModeTabs({
   onView,
   status,
   help,
-  toggle,
   scope,
   failover,
   onOpenRouteSettings,
@@ -97,8 +82,6 @@ export function ModeTabs({
     '[aria-pressed="true"]',
     view,
   );
-
-  const ToggleIcon = toggle?.icon;
 
   return (
     <div
@@ -187,24 +170,7 @@ export function ModeTabs({
         />
       )}
 
-      {toggle && ToggleIcon && (
-        <HoverTip content={toggle.label}>
-          <label className="flex shrink-0 cursor-pointer items-center gap-1.5">
-            <ToggleIcon
-              className="h-4 w-4 text-fg-2"
-              strokeWidth={1.5}
-              aria-hidden="true"
-            />
-            <Switch
-              checked={toggle.checked}
-              disabled={toggle.disabled}
-              onCheckedChange={toggle.onChange}
-              aria-label={toggle.label}
-            />
-          </label>
-        </HoverTip>
-      )}
-      {!toggle && failover && (
+      {failover && (
         <HoverTip content={t("mode.failover")}>
           <label className="flex shrink-0 cursor-pointer items-center gap-1.5">
             <Shuffle
