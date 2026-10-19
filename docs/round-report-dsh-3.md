@@ -177,6 +177,12 @@ PROXY_APPS 成员」），它的接管状态在 relay 侧车，所以侧栏永�
 - 侧栏标签在选中行隐藏（与 Claude Code 一致），所以「切回 DSH 后看不到自己的标签」是设计，不是回归。
 - 用量页顶部「工作階段日誌 · 剛剛同步」是数据来源徽标，本来就该出现；本轮修的是供應商列。
 
+## 交付
+
+- 交付提交：`15514d6`（`personal-6reqs`），已推送到 `dsh` 远端的 `main` 分支
+  （[MadeSpark/CC-Switch-DSH](https://github.com/MadeSpark/CC-Switch-DSH)）。
+- 上游来源声明、MIT 许可证与 `PERSONAL-NOTICE.md` 第 13 条一并包含在该提交里。
+
 ## 回滚
 
 1. 关掉 DSH 中转（应用页「直連」→「回到直連」），确认 `cordis.patch.yml` 已无 `/dsh/` 地址。
