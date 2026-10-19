@@ -139,7 +139,7 @@ PROXY_APPS 成员」），它的接管状态在 relay 侧车，所以侧栏永�
 | 用量页請求日誌                    | 19:06 起的 DSH 行顯示 `DSH / WorkBuddy / deepseek-v4.1-flash`                    |
 | 收尾                              | 点「回到直連」，`attached=false`、`relayed=0`，patch 恢复 13,300 B、0 处 `/dsh/` |
 
-截图（`D:\DevelopmentFolder\默认工作区\ccswitch-dsh8-shots\`）：
+截图（`D:\DevelopmentFolder\默认工作区\ccs\ccswitch-dsh8-shots\`）：
 `01-initial-direct.png`、`02-route-view-cta.png`、`03-attached-route-view.png`、
 `04-claude-sidebar-dsh-route-pill.png`、`05-back-to-dsh-stays-route.png`、`06-usage-page.png`、
 `07-final-direct.png`。

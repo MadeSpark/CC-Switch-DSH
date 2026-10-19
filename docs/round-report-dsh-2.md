@@ -128,7 +128,7 @@
 - `~/.dsh/profiles/desktop/cordis.patch.yml` 已恢复为测试前内容（0 处 `/dsh/` 地址，SHA256 `3F27C3BA…DBC4`）。
 - 侧车 `~/.cc-switch/dsh_relay_state.json` = `{"attached":false,"baseUrl":null,"providers":[]}`。
 - `dshRelayEnabled=false`、`dshRestoreOnExit=true`、`usageDisplay.tokenUnit` 已删除（回到默认 `intl`）；CCS 以新版本在运行。
-- 截图（`D:\DevelopmentFolder\默认工作区\ccswitch-dsh-round-shots\`）：`01`–`04` 中转页与接管/还原、`05` 推理等级弹层、`06`–`07` 用量看板与 DSH 过滤、`08` Token 单位下拉、`09` 關於页版本。
+- 截图（`D:\DevelopmentFolder\默认工作区\ccs\ccswitch-dsh-round-shots\`）：`01`–`04` 中转页与接管/还原、`05` 推理等级弹层、`06`–`07` 用量看板与 DSH 过滤、`08` Token 单位下拉、`09` 關於页版本。
 
 ## 本轮（4.0.14-dsh.5）验证与结果
 
@@ -179,7 +179,7 @@
 
 ### 5. 截图
 
-新增 `D:\DevelopmentFolder\默认工作区\ccswitch-dsh5-shots\`（`ccswitch-dsh5-shots.cjs` 驱动，结果 `ok: true`，7 张；`05-card-actions.png` 为补拍）：
+新增 `D:\DevelopmentFolder\默认工作区\ccs\ccswitch-dsh5-shots\`（`ccswitch-dsh5-shots.cjs` 驱动，结果 `ok: true`，7 张；`05-card-actions.png` 为补拍）：
 
 - `01-direct-mode.png`：直連态，状态行「直連生效中 · 直接連線 WorkBuddy · deepseek-v4.1-flash」，右侧开关 `aria-checked=false`。
 - `02-route-mode.png`：切到「路由」，胶囊随视图移动。
