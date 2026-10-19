@@ -56,7 +56,19 @@ interface DshReasoningLevelsEditorProps {
   efforts?: DshReasoningEfforts;
   /** 最后一个非 off 等级：不能再取消，点了只给提示。 */
   blockedLevel?: string;
+  /** 推荐预设家族；有值时面板底部给出「使用预设」。 */
+  recommendedFamily?: string;
+  /** 当前等级表已与推荐预设完全一致。 */
+  recommendedApplied?: boolean;
+  /** 这一行显式写了 `reasoningEfforts: false`。 */
+  forcedOff?: boolean;
+  /** 这一行开了 `compat.forceAdaptiveThinking`。 */
+  adaptive?: boolean;
+  /** 有可清除的字段（等级表或 false）时显示清除按钮。 */
+  clearable?: boolean;
   onToggle: (level: string) => void;
+  onApplyPreset?: () => void;
+  onClear?: () => void;
 }
 
 /**
@@ -67,7 +79,14 @@ interface DshReasoningLevelsEditorProps {
 function DshReasoningLevelsEditor({
   efforts,
   blockedLevel,
+  recommendedFamily,
+  recommendedApplied,
+  forcedOff,
+  adaptive,
+  clearable,
   onToggle,
+  onApplyPreset,
+  onClear,
 }: DshReasoningLevelsEditorProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
@@ -85,7 +104,9 @@ function DshReasoningLevelsEditor({
   const triggerLabel =
     selected.length > 0
       ? formatDshReasoningLevelsLabel(selected)
-      : t("dshReasoning.notSet", { defaultValue: "Not set" });
+      : forcedOff
+        ? t("dshReasoning.disabled", { defaultValue: "Disabled" })
+        : t("dshReasoning.notSet", { defaultValue: "Not set" });
 
   return (
     <Popover modal={false} open={open} onOpenChange={setOpen}>
@@ -95,11 +116,13 @@ function DshReasoningLevelsEditor({
           aria-label={t("dshReasoning.label", { defaultValue: "Reasoning" })}
           title={triggerLabel}
           className={cn(
-            "flex h-7 items-center justify-between gap-1 whitespace-nowrap rounded-md border border-border-default bg-surface px-2 text-caption leading-none transition-colors hover:border-border-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring data-[state=open]:border-border-strong",
-            selected.length === 0 ? "text-fg-3" : "text-fg-1",
+            "flex h-8 w-full min-w-0 items-center justify-between gap-1 whitespace-nowrap rounded-md border border-border-default bg-surface px-2 text-caption leading-none transition-colors hover:border-border-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring data-[state=open]:border-border-strong",
+            selected.length === 0 && !forcedOff ? "text-fg-3" : "text-fg-1",
           )}
         >
-          <span className="min-w-16 truncate">{triggerLabel}</span>
+          <span className="min-w-0 flex-1 truncate text-left">
+            {triggerLabel}
+          </span>
           <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-60" />
         </button>
       </PopoverTrigger>
@@ -177,6 +200,62 @@ function DshReasoningLevelsEditor({
               defaultValue: "At least one level must stay enabled",
             })}
           </p>
+        )}
+        {(recommendedFamily ||
+          forcedOff ||
+          adaptive ||
+          (clearable && onClear)) && (
+          <div className="mt-1 space-y-0.5 border-t border-border-default px-1 pt-1">
+            {recommendedFamily && !recommendedApplied && onApplyPreset && (
+              <button
+                type="button"
+                onClick={onApplyPreset}
+                className="block w-full rounded-control px-1.5 py-1 text-left text-caption text-action-text hover:bg-subtle hover:underline"
+              >
+                {t("dshReasoning.applyPreset", {
+                  defaultValue: "Use {{family}} preset",
+                  family: recommendedFamily,
+                })}
+              </button>
+            )}
+            {recommendedFamily && recommendedApplied && (
+              <p className="px-1.5 py-1 text-caption text-fg-3">
+                {t("dshReasoning.recommended", {
+                  defaultValue: "{{family}} preset",
+                  family: recommendedFamily,
+                })}
+              </p>
+            )}
+            {forcedOff && (
+              <p className="px-1.5 py-1 text-caption text-fg-3">
+                {t("dshReasoning.forcedOff", {
+                  defaultValue: "Reasoning disabled (false)",
+                })}
+              </p>
+            )}
+            {adaptive && (
+              <p className="px-1.5 py-1 text-caption text-fg-3">
+                {t("dshReasoning.adaptive", {
+                  defaultValue: "Adaptive thinking on",
+                })}
+              </p>
+            )}
+            {clearable && onClear && (
+              <button
+                type="button"
+                onClick={onClear}
+                aria-label={t("dshReasoning.clear", {
+                  defaultValue: "Clear reasoning levels",
+                })}
+                className="flex w-full items-center gap-1.5 rounded-control px-1.5 py-1 text-left text-caption text-fg-2 hover:bg-subtle hover:text-fg-1"
+              >
+                <X className="h-3.5 w-3.5 shrink-0" />
+                {t("dshReasoning.clear", {
+                  defaultValue: "Clear reasoning levels",
+                })}
+              </button>
+            )}
+          </div>
         )}
       </PopoverContent>
     </Popover>
@@ -570,21 +649,25 @@ export function DeepSeekHarnessFormFields({
           </p>
         ) : (
           <div className="space-y-2">
-            <div className="flex items-center gap-2 text-xs text-muted-foreground px-2 mb-1">
-              <span className="flex-1">
-                {t("deepseekHarness.modelId", { defaultValue: "Model ID" })}
-              </span>
-              <span className="flex-1">
+            {/* 列头：与 Codex 的模型目錄一致，md+ 一行一列。 */}
+            <div className="hidden grid-cols-[minmax(0,1fr)_minmax(0,1fr)_140px_minmax(0,1fr)_36px] gap-2 px-2 text-xs text-muted-foreground md:grid">
+              <span>
                 {t("deepseekHarness.modelName", {
                   defaultValue: "Display Name",
                 })}
               </span>
-              <span className="w-32">
+              <span>
+                {t("deepseekHarness.modelId", { defaultValue: "Model ID" })}
+              </span>
+              <span>
                 {t("deepseekHarness.contextWindow", {
                   defaultValue: "Context Window",
                 })}
               </span>
-              <span className="w-9" />
+              <span>
+                {t("dshReasoning.label", { defaultValue: "Reasoning" })}
+              </span>
+              <span />
             </div>
             {models.map((model, index) => {
               // 这一行的推理等级：跟着模型族推荐值走，用户可以逐级微调。
@@ -611,136 +694,87 @@ export function DeepSeekHarnessFormFields({
               return (
                 <div
                   key={model.rowKey ?? index}
-                  className="space-y-1.5 rounded-md border border-border-default px-2 py-1.5"
+                  className="grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_140px_minmax(0,1fr)_36px]"
                 >
-                  <div className="flex items-center gap-2">
-                    <div className="flex min-w-0 flex-1 gap-1">
-                      <ImeSafeInput
-                        value={model.id}
-                        onValueChange={(value) =>
-                          updateModel(index, { id: value })
-                        }
-                        placeholder={t("deepseekHarness.modelId", {
-                          defaultValue: "Model ID",
-                        })}
-                        className="flex-1"
-                      />
-                      {fetchedModels.length > 0 && (
-                        <ModelDropdown
-                          models={fetchedModels}
-                          onSelect={(id) => {
-                            updateModel(index, { id });
-                          }}
-                        />
-                      )}
-                    </div>
+                  <ImeSafeInput
+                    value={model.name ?? ""}
+                    onValueChange={(value) =>
+                      updateModel(index, { name: value })
+                    }
+                    placeholder={t("deepseekHarness.modelName", {
+                      defaultValue: "Display Name",
+                    })}
+                  />
+                  <div className="flex min-w-0 gap-1">
                     <ImeSafeInput
-                      value={model.name ?? ""}
+                      value={model.id}
                       onValueChange={(value) =>
-                        updateModel(index, { name: value })
+                        updateModel(index, { id: value })
                       }
-                      placeholder={t("deepseekHarness.modelName", {
-                        defaultValue: "Display Name",
+                      placeholder={t("deepseekHarness.modelId", {
+                        defaultValue: "Model ID",
                       })}
-                      className="flex-1"
+                      className="min-w-0 flex-1"
                     />
-                    <Input
-                      type="number"
-                      min={0}
-                      step={1}
-                      aria-label={t("deepseekHarness.contextWindow", {
-                        defaultValue: "Context Window",
-                      })}
-                      value={model.contextWindow ?? ""}
-                      onChange={(event) => {
-                        const raw = event.target.value.trim();
-                        if (raw === "") {
-                          updateModel(index, { contextWindow: undefined });
-                          return;
-                        }
-                        const parsed = Number(raw);
-                        if (Number.isFinite(parsed) && parsed >= 0) {
-                          updateModel(index, {
-                            contextWindow: Math.trunc(parsed),
-                          });
-                        }
-                      }}
-                      placeholder="131072"
-                      className="w-32"
-                    />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => removeModel(index)}
-                      aria-label={t("common.remove", {
-                        defaultValue: "Remove",
-                      })}
-                      className="h-9 w-9 text-muted-foreground hover:text-destructive"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
-
-                  {/* 推理等级：与 Codex 表单同款控件，勾中的等级会写进模型配置 */}
-                  <div className="flex flex-wrap items-center gap-1.5 pl-1">
-                    <span className="text-caption text-muted-foreground">
-                      {t("dshReasoning.label", { defaultValue: "Reasoning" })}
-                    </span>
-                    <DshReasoningLevelsEditor
-                      efforts={efforts}
-                      blockedLevel={blockedLevel}
-                      onToggle={(level) =>
-                        handleToggleReasoningLevel(index, level)
-                      }
-                    />
-                    {isForcedOff && (
-                      <span className="text-caption text-muted-foreground">
-                        {t("dshReasoning.forcedOff", {
-                          defaultValue: "Reasoning disabled (false)",
-                        })}
-                      </span>
-                    )}
-                    {recommended && !isRecommended && (
-                      <button
-                        type="button"
-                        onClick={() => handleApplyReasoningPreset(index)}
-                        className="text-caption text-action-text hover:underline"
-                      >
-                        {t("dshReasoning.applyPreset", {
-                          defaultValue: "Use {{family}} preset",
-                          family: recommended.family,
-                        })}
-                      </button>
-                    )}
-                    {isRecommended && (
-                      <span className="text-caption text-muted-foreground">
-                        {t("dshReasoning.recommended", {
-                          defaultValue: "{{family}} preset",
-                          family: recommended.family,
-                        })}
-                      </span>
-                    )}
-                    {(efforts || isForcedOff) && (
-                      <button
-                        type="button"
-                        onClick={() => handleClearReasoningEfforts(index)}
-                        aria-label={t("dshReasoning.clear", {
-                          defaultValue: "Clear reasoning levels",
-                        })}
-                        className="flex h-6 w-6 items-center justify-center rounded-full text-fg-3 hover:text-fg-1"
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
-                    )}
-                    {isAdaptive && (
-                      <span className="text-caption text-muted-foreground">
-                        {t("dshReasoning.adaptive", {
-                          defaultValue: "Adaptive thinking on",
-                        })}
-                      </span>
+                    {fetchedModels.length > 0 && (
+                      <ModelDropdown
+                        models={fetchedModels}
+                        onSelect={(id) => {
+                          updateModel(index, { id });
+                        }}
+                      />
                     )}
                   </div>
+                  <Input
+                    type="number"
+                    min={0}
+                    step={1}
+                    aria-label={t("deepseekHarness.contextWindow", {
+                      defaultValue: "Context Window",
+                    })}
+                    value={model.contextWindow ?? ""}
+                    onChange={(event) => {
+                      const raw = event.target.value.trim();
+                      if (raw === "") {
+                        updateModel(index, { contextWindow: undefined });
+                        return;
+                      }
+                      const parsed = Number(raw);
+                      if (Number.isFinite(parsed) && parsed >= 0) {
+                        updateModel(index, {
+                          contextWindow: Math.trunc(parsed),
+                        });
+                      }
+                    }}
+                    placeholder="131072"
+                    className="w-full"
+                  />
+                  <DshReasoningLevelsEditor
+                    efforts={efforts}
+                    blockedLevel={blockedLevel}
+                    recommendedFamily={recommended?.family}
+                    recommendedApplied={isRecommended}
+                    forcedOff={isForcedOff}
+                    adaptive={isAdaptive}
+                    clearable={!!(efforts || isForcedOff)}
+                    onToggle={(level) =>
+                      handleToggleReasoningLevel(index, level)
+                    }
+                    onApplyPreset={() => handleApplyReasoningPreset(index)}
+                    onClear={() => handleClearReasoningEfforts(index)}
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => removeModel(index)}
+                    aria-label={t("common.remove", {
+                      defaultValue: "Remove",
+                    })}
+                    className="h-8 w-8 justify-self-end text-muted-foreground hover:text-destructive"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
                 </div>
               );
             })}

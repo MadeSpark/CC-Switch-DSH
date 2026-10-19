@@ -2469,7 +2469,17 @@
       "requests": "請求",
       "tokens": "Tokens",
       "cost": "成本",
-      "requestsLegend": "請求數"
+      "requestsLegend": "請求數",
+      "tokenHit": "輸入（命中快取）",
+      "tokenMiss": "輸入（未命中快取）",
+      "tokenWrite": "快取寫入",
+      "tokenOutput": "輸出",
+      "legendHit": "命中快取",
+      "legendMiss": "未命中",
+      "legendWrite": "快取寫入",
+      "legendOutput": "輸出",
+      "modelSection": "模型",
+      "moreModels": "其他 {{count}} 個模型"
     },
     "tabs": {
       "label": "明細",
@@ -4988,6 +4998,7 @@
   "dshReasoning": {
     "label": "推理等級",
     "notSet": "未設定",
+    "disabled": "已停用",
     "chipWire": "傳送值：{{wire}}",
     "chipSilent": "不傳送思考參數",
     "noParam": "不傳送",

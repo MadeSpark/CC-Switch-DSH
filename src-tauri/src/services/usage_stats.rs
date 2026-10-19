@@ -99,6 +99,16 @@ fn usage_summary_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<UsageSumm
     })
 }
 
+/// 时间桶内单个模型的真实消耗 Tokens（新增输入 + 输出 + 缓存写入 + 缓存命中）。
+///
+/// 只用于「使用趋势」在「全部模型」时的 tooltip 明细；按具体模型筛选时为空。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelTokenUsage {
+    pub model: String,
+    pub total_tokens: u64,
+}
+
 /// 每日统计
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -111,6 +121,30 @@ pub struct DailyStats {
     pub total_output_tokens: u64,
     pub total_cache_creation_tokens: u64,
     pub total_cache_read_tokens: u64,
+    /// 该时间桶内按模型拆分的真实消耗 Tokens，按总量降序；按具体模型筛选时为空。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub models: Vec<ModelTokenUsage>,
+}
+
+/// 把一个模型的 token 数并入按模型拆分的列表：同模型累加，否则追加。
+fn merge_model_token_usage(entries: &mut Vec<ModelTokenUsage>, model: String, total_tokens: u64) {
+    if let Some(existing) = entries.iter_mut().find(|entry| entry.model == model) {
+        existing.total_tokens = existing.total_tokens.saturating_add(total_tokens);
+    } else {
+        entries.push(ModelTokenUsage {
+            model,
+            total_tokens,
+        });
+    }
+}
+
+/// 模型明细按真实消耗降序；同量时按模型名升序，保证输出稳定。
+fn sort_model_token_usage(entries: &mut [ModelTokenUsage]) {
+    entries.sort_by(|a, b| {
+        b.total_tokens
+            .cmp(&a.total_tokens)
+            .then_with(|| a.model.cmp(&b.model))
+    });
 }
 
 /// Provider 统计
@@ -1364,6 +1398,7 @@ impl Database {
                         total_output_tokens: row.get::<_, i64>(5)? as u64,
                         total_cache_creation_tokens: row.get::<_, i64>(6)? as u64,
                         total_cache_read_tokens: row.get::<_, i64>(7)? as u64,
+                        models: Vec::new(),
                     },
                 ))
             };
@@ -1390,14 +1425,61 @@ impl Database {
                 map.insert(bucket_idx, stat);
             }
 
+            // 按模型拆分的同桶 token 明细：仅「全部模型」时查询。桶号与上面的总量
+            // 查询同口径：created_at == end_ts 且窗口正好整小时的行会算出越界桶号，
+            // 并入最后一桶；负桶号忽略。
+            let mut models_by_bucket: HashMap<i64, Vec<ModelTokenUsage>> = HashMap::new();
+            if model.is_none() {
+                let model_expr = effective_model_sql("l");
+                let real_total = real_total_tokens_sql("l");
+                let model_sql = format!(
+                    "SELECT
+                        CAST((l.created_at - ?1) / ?3 AS INTEGER) as bucket_idx,
+                        {model_expr} as model,
+                        COALESCE(SUM({real_total}), 0) as total_tokens
+                    FROM proxy_request_logs l {detail_join}
+                    WHERE l.created_at >= ?1 AND l.created_at <= ?2
+                      AND {effective_filter} {extra_filter}
+                    GROUP BY bucket_idx, {model_expr}
+                    ORDER BY bucket_idx ASC, total_tokens DESC"
+                );
+                let mut model_stmt = conn.prepare(&model_sql)?;
+                let model_rows = model_stmt.query_map(param_refs.as_slice(), |row| {
+                    Ok((
+                        row.get::<_, i64>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, i64>(2)?.max(0) as u64,
+                    ))
+                })?;
+                for row in model_rows {
+                    let (mut bucket_idx, model_name, total_tokens) = row?;
+                    if bucket_idx < 0 {
+                        continue;
+                    }
+                    if bucket_idx >= bucket_count {
+                        bucket_idx = bucket_count - 1;
+                    }
+                    merge_model_token_usage(
+                        models_by_bucket.entry(bucket_idx).or_default(),
+                        model_name,
+                        total_tokens,
+                    );
+                }
+                for models in models_by_bucket.values_mut() {
+                    sort_model_token_usage(models);
+                }
+            }
+
             let mut stats = Vec::with_capacity(bucket_count as usize);
             for i in 0..bucket_count {
                 let bucket_start_ts = start_ts + i * bucket_seconds;
                 let bucket_start = local_datetime_from_timestamp(bucket_start_ts)?;
                 let date = bucket_start.to_rfc3339();
+                let models = models_by_bucket.remove(&i).unwrap_or_default();
 
                 if let Some(mut stat) = map.remove(&i) {
                     stat.date = date;
+                    stat.models = models;
                     stats.push(stat);
                 } else {
                     stats.push(DailyStats {
@@ -1409,6 +1491,7 @@ impl Database {
                         total_output_tokens: 0,
                         total_cache_creation_tokens: 0,
                         total_cache_read_tokens: 0,
+                        models,
                     });
                 }
             }
@@ -1478,6 +1561,7 @@ impl Database {
                     total_output_tokens: row.get::<_, i64>(5)? as u64,
                     total_cache_creation_tokens: row.get::<_, i64>(6)? as u64,
                     total_cache_read_tokens: row.get::<_, i64>(7)? as u64,
+                    models: Vec::new(),
                 },
             ))
         };
@@ -1579,6 +1663,7 @@ impl Database {
                 total_output_tokens: 0,
                 total_cache_creation_tokens: 0,
                 total_cache_read_tokens: 0,
+                models: Vec::new(),
             });
             entry.request_count += req;
             let existing_cost: f64 = entry.total_cost.parse().unwrap_or(0.0);
@@ -1590,13 +1675,91 @@ impl Database {
             entry.total_cache_read_tokens += cr;
         }
 
+        // 按模型拆分的日明细：仅「全部模型」时查询。明细与日汇总可能覆盖同一天，
+        // 同 date+model 合并后再按真实消耗降序；日期过滤、JOIN 与参数完全复用上面的
+        // 总量查询口径，保证拆分之和与趋势总量来源一致。
+        let mut models_by_date: HashMap<NaiveDate, Vec<ModelTokenUsage>> = HashMap::new();
+        if model.is_none() {
+            let detail_model_expr = effective_model_sql("l");
+            let detail_real_total = real_total_tokens_sql("l");
+            let detail_model_sql = format!(
+                "SELECT
+                    date(l.created_at, 'unixepoch', 'localtime') as bucket_date,
+                    {detail_model_expr} as model,
+                    COALESCE(SUM({detail_real_total}), 0) as total_tokens
+                FROM proxy_request_logs l {detail_join}
+                WHERE l.created_at >= ?1 AND l.created_at <= ?2
+                  AND {effective_filter} {extra_filter}
+                GROUP BY bucket_date, {detail_model_expr}
+                ORDER BY bucket_date ASC, total_tokens DESC"
+            );
+            let mut detail_model_stmt = conn.prepare(&detail_model_sql)?;
+            let detail_model_rows =
+                detail_model_stmt.query_map(detail_param_refs.as_slice(), |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, i64>(2)?.max(0) as u64,
+                    ))
+                })?;
+            for row in detail_model_rows {
+                let (bucket_date, model_name, total_tokens) = row?;
+                let date = NaiveDate::parse_from_str(&bucket_date, "%Y-%m-%d")
+                    .map_err(|err| AppError::Database(format!("解析模型趋势日期失败: {err}")))?;
+                merge_model_token_usage(
+                    models_by_date.entry(date).or_default(),
+                    model_name,
+                    total_tokens,
+                );
+            }
+
+            let rollup_model_expr = effective_model_sql("r");
+            let rollup_real_total = real_total_tokens_sql("r");
+            let rollup_model_sql = format!(
+                "SELECT
+                    r.date,
+                    {rollup_model_expr} as model,
+                    COALESCE(SUM({rollup_real_total}), 0) as total_tokens
+                FROM usage_daily_rollups r {rollup_join}
+                {rollup_where}
+                GROUP BY r.date, {rollup_model_expr}
+                ORDER BY r.date ASC, total_tokens DESC"
+            );
+            let mut rollup_model_stmt = conn.prepare(&rollup_model_sql)?;
+            let rollup_model_rows =
+                rollup_model_stmt.query_map(rollup_param_refs.as_slice(), |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, i64>(2)?.max(0) as u64,
+                    ))
+                })?;
+            for row in rollup_model_rows {
+                let (bucket_date, model_name, total_tokens) = row?;
+                let date = NaiveDate::parse_from_str(&bucket_date, "%Y-%m-%d").map_err(|err| {
+                    AppError::Database(format!("解析 rollup 模型趋势日期失败: {err}"))
+                })?;
+                merge_model_token_usage(
+                    models_by_date.entry(date).or_default(),
+                    model_name,
+                    total_tokens,
+                );
+            }
+
+            for models in models_by_date.values_mut() {
+                sort_model_token_usage(models);
+            }
+        }
+
         let mut stats = Vec::with_capacity(bucket_count);
         let mut current_day = start_day;
         for _ in 0..bucket_count {
             let date = local_day_start_rfc3339(current_day);
+            let models = models_by_date.remove(&current_day).unwrap_or_default();
 
             if let Some(mut stat) = map.remove(&current_day) {
                 stat.date = date;
+                stat.models = models;
                 stats.push(stat);
             } else {
                 stats.push(DailyStats {
@@ -1608,6 +1771,7 @@ impl Database {
                     total_output_tokens: 0,
                     total_cache_creation_tokens: 0,
                     total_cache_read_tokens: 0,
+                    models,
                 });
             }
 
@@ -5780,6 +5944,324 @@ mod tests {
         assert_eq!(stats[1].total_tokens, 600);
         assert_eq!(stats[2].request_count, 1);
         assert_eq!(stats[2].total_tokens, 275);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_daily_trends_model_token_usage_by_day() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        let start = local_ts(2024, 3, 1, 0, 0, 0);
+        let end = local_ts(2024, 3, 3, 23, 59, 0);
+
+        {
+            let conn = lock_conn!(db.conn);
+            // 03-01 同一天两个模型，其中 sonnet 有两行明细。
+            insert_usage_log(
+                &conn,
+                "model-day-1",
+                "claude",
+                "p1",
+                "claude-sonnet-4-6",
+                "proxy",
+                local_ts(2024, 3, 1, 9, 0, 0),
+                100,
+                50,
+                0,
+                0,
+                200,
+                "0.01",
+            )?;
+            insert_usage_log(
+                &conn,
+                "model-day-2",
+                "claude",
+                "p1",
+                "claude-sonnet-4-6",
+                "proxy",
+                local_ts(2024, 3, 1, 10, 0, 0),
+                200,
+                100,
+                0,
+                0,
+                200,
+                "0.02",
+            )?;
+            insert_usage_log(
+                &conn,
+                "model-day-3",
+                "claude",
+                "p1",
+                "deepseek-v3",
+                "proxy",
+                local_ts(2024, 3, 1, 11, 0, 0),
+                300,
+                50,
+                0,
+                0,
+                200,
+                "0.03",
+            )?;
+            insert_usage_log(
+                &conn,
+                "model-day-4",
+                "claude",
+                "p1",
+                "gemini-2.5-pro",
+                "proxy",
+                local_ts(2024, 3, 3, 9, 0, 0),
+                40,
+                10,
+                0,
+                0,
+                200,
+                "0.04",
+            )?;
+            // 03-01 的汇总行与明细同日同模型，验证合并；03-02 只有汇总；
+            // 03-03 明细与汇总各一条，验证按模型降序。
+            conn.execute(
+                "INSERT INTO usage_daily_rollups (
+                    date, app_type, provider_id, model,
+                    request_count, success_count, input_tokens, output_tokens,
+                    cache_read_tokens, cache_creation_tokens, total_cost_usd, avg_latency_ms
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                params![
+                    "2024-03-01",
+                    "claude",
+                    "p1",
+                    "claude-sonnet-4-6",
+                    2,
+                    2,
+                    500,
+                    100,
+                    0,
+                    0,
+                    "0.50",
+                    100
+                ],
+            )?;
+            conn.execute(
+                "INSERT INTO usage_daily_rollups (
+                    date, app_type, provider_id, model,
+                    request_count, success_count, input_tokens, output_tokens,
+                    cache_read_tokens, cache_creation_tokens, total_cost_usd, avg_latency_ms
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                params![
+                    "2024-03-02",
+                    "claude",
+                    "p1",
+                    "deepseek-v3",
+                    4,
+                    4,
+                    70,
+                    30,
+                    0,
+                    0,
+                    "0.07",
+                    100
+                ],
+            )?;
+            conn.execute(
+                "INSERT INTO usage_daily_rollups (
+                    date, app_type, provider_id, model,
+                    request_count, success_count, input_tokens, output_tokens,
+                    cache_read_tokens, cache_creation_tokens, total_cost_usd, avg_latency_ms
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                params![
+                    "2024-03-03",
+                    "claude",
+                    "p1",
+                    "claude-sonnet-4-6",
+                    1,
+                    1,
+                    10,
+                    5,
+                    0,
+                    0,
+                    "0.01",
+                    100
+                ],
+            )?;
+        }
+
+        let stats = db.get_daily_trends(Some(start), Some(end), Some("claude"), None, None)?;
+        assert_eq!(stats.len(), 3);
+
+        // 03-01：明细 150 + 300 + 350 = 800，汇总 600，合计 1400。
+        assert_eq!(stats[0].request_count, 5);
+        assert_eq!(stats[0].total_tokens, 1400);
+        assert_eq!(stats[0].models.len(), 2);
+        assert_eq!(stats[0].models[0].model, "claude-sonnet-4-6");
+        assert_eq!(stats[0].models[0].total_tokens, 1050);
+        assert_eq!(stats[0].models[1].model, "deepseek-v3");
+        assert_eq!(stats[0].models[1].total_tokens, 350);
+        let day_one_models_total: u64 = stats[0].models.iter().map(|m| m.total_tokens).sum();
+        assert_eq!(day_one_models_total, stats[0].total_tokens);
+
+        // 03-02：只有汇总行。
+        assert_eq!(stats[1].request_count, 4);
+        assert_eq!(stats[1].total_tokens, 100);
+        assert_eq!(stats[1].models.len(), 1);
+        assert_eq!(stats[1].models[0].model, "deepseek-v3");
+        assert_eq!(stats[1].models[0].total_tokens, 100);
+
+        // 03-03：明细 + 汇总，两个模型按总量降序。
+        assert_eq!(stats[2].request_count, 2);
+        assert_eq!(stats[2].total_tokens, 65);
+        assert_eq!(stats[2].models.len(), 2);
+        assert_eq!(stats[2].models[0].model, "gemini-2.5-pro");
+        assert_eq!(stats[2].models[0].total_tokens, 50);
+        assert_eq!(stats[2].models[1].model, "claude-sonnet-4-6");
+        assert_eq!(stats[2].models[1].total_tokens, 15);
+        let day_three_models_total: u64 = stats[2].models.iter().map(|m| m.total_tokens).sum();
+        assert_eq!(day_three_models_total, stats[2].total_tokens);
+
+        // 按具体模型筛选时不做模型拆分。
+        let filtered = db.get_daily_trends(
+            Some(start),
+            Some(end),
+            Some("claude"),
+            None,
+            Some("deepseek-v3"),
+        )?;
+        assert!(filtered.iter().all(|stat| stat.models.is_empty()));
+        assert_eq!(
+            filtered.iter().map(|stat| stat.request_count).sum::<u64>(),
+            5
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_daily_trends_model_token_usage_by_hour() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        let start = local_ts(2026, 6, 10, 0, 0, 0);
+        let end = local_ts(2026, 6, 10, 6, 0, 0);
+
+        {
+            let conn = lock_conn!(db.conn);
+            insert_usage_log(
+                &conn,
+                "model-hour-0",
+                "claude",
+                "p1",
+                "deepseek-v3",
+                "proxy",
+                local_ts(2026, 6, 10, 0, 30, 0),
+                10,
+                5,
+                0,
+                0,
+                200,
+                "0.01",
+            )?;
+            // 02:00–03:00 同一个桶里两个模型，sonnet 两行。
+            insert_usage_log(
+                &conn,
+                "model-hour-2a",
+                "claude",
+                "p1",
+                "claude-sonnet-4-6",
+                "proxy",
+                local_ts(2026, 6, 10, 2, 10, 0),
+                100,
+                20,
+                0,
+                0,
+                200,
+                "0.02",
+            )?;
+            insert_usage_log(
+                &conn,
+                "model-hour-2b",
+                "claude",
+                "p1",
+                "claude-sonnet-4-6",
+                "proxy",
+                local_ts(2026, 6, 10, 2, 40, 0),
+                50,
+                10,
+                0,
+                0,
+                200,
+                "0.03",
+            )?;
+            insert_usage_log(
+                &conn,
+                "model-hour-2c",
+                "claude",
+                "p1",
+                "deepseek-v3",
+                "proxy",
+                local_ts(2026, 6, 10, 2, 50, 0),
+                300,
+                30,
+                0,
+                0,
+                200,
+                "0.04",
+            )?;
+            // 恰好落在窗口右端点：桶号越界，应并入最后一桶。
+            insert_usage_log(
+                &conn,
+                "model-hour-end",
+                "claude",
+                "p1",
+                "gemini-2.5-pro",
+                "proxy",
+                local_ts(2026, 6, 10, 6, 0, 0),
+                3,
+                2,
+                0,
+                0,
+                200,
+                "0.05",
+            )?;
+        }
+
+        let stats = db.get_daily_trends(Some(start), Some(end), Some("claude"), None, None)?;
+        assert_eq!(stats.len(), 6);
+
+        assert_eq!(stats[0].models.len(), 1);
+        assert_eq!(stats[0].models[0].model, "deepseek-v3");
+        assert_eq!(stats[0].models[0].total_tokens, 15);
+
+        assert!(stats[1].models.is_empty());
+
+        assert_eq!(stats[2].request_count, 3);
+        assert_eq!(stats[2].total_tokens, 510);
+        assert_eq!(stats[2].models.len(), 2);
+        assert_eq!(stats[2].models[0].model, "deepseek-v3");
+        assert_eq!(stats[2].models[0].total_tokens, 330);
+        assert_eq!(stats[2].models[1].model, "claude-sonnet-4-6");
+        assert_eq!(stats[2].models[1].total_tokens, 180);
+        let bucket_models_total: u64 = stats[2].models.iter().map(|m| m.total_tokens).sum();
+        assert_eq!(bucket_models_total, stats[2].total_tokens);
+
+        assert!(stats[3].models.is_empty());
+        assert!(stats[4].models.is_empty());
+
+        // 越界桶并入最后一桶后，模型明细与总量保持一致。
+        assert_eq!(stats[5].request_count, 1);
+        assert_eq!(stats[5].total_tokens, 5);
+        assert_eq!(stats[5].models.len(), 1);
+        assert_eq!(stats[5].models[0].model, "gemini-2.5-pro");
+        assert_eq!(stats[5].models[0].total_tokens, 5);
+
+        // 按具体模型筛选时不做模型拆分。
+        let filtered = db.get_daily_trends(
+            Some(start),
+            Some(end),
+            Some("claude"),
+            None,
+            Some("claude-sonnet-4-6"),
+        )?;
+        assert!(filtered.iter().all(|stat| stat.models.is_empty()));
+        assert_eq!(
+            filtered.iter().map(|stat| stat.request_count).sum::<u64>(),
+            2
+        );
 
         Ok(())
     }

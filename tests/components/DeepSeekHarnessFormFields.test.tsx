@@ -106,6 +106,19 @@ describe("DeepSeekHarnessFormFields", () => {
     );
   });
 
+  it("keeps every model control on a single grid row", () => {
+    renderFields();
+
+    const row = screen
+      .getByPlaceholderText("Model ID")
+      .closest('[class*="md:grid-cols-"]');
+    expect(row).not.toBeNull();
+    // 显示名 / 模型 ID / 上下文 / 推理等级 / 删除，一行五格，不再拆第二行。
+    expect(row?.childElementCount).toBe(5);
+    expect(row).toContainElement(screen.getByLabelText("Context Window"));
+    expect(row).toContainElement(screen.getByLabelText("Reasoning"));
+  });
+
   it("hides credential ref and API format for official providers", () => {
     renderFields({
       isOfficial: true,

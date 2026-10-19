@@ -32,15 +32,18 @@ vi.mock("@/lib/query/usage", () => ({
         requestCount: 12,
         totalInputTokens: 100,
         totalOutputTokens: 50,
-        totalCacheCreationTokens: 0,
+        totalCacheCreationTokens: 20,
         totalCacheReadTokens: 0,
         totalCost: "0.01",
+        models: [
+          { model: "gpt-5", totalTokens: 100 },
+          { model: "claude-sonnet-4", totalTokens: 70 },
+        ],
       },
     ],
     isLoading: false,
   }),
 }));
-
 describe("UsageTrendChart (single metric)", () => {
   it("shows only the selected metric in the legend and follows the switch", async () => {
     const user = userEvent.setup();
@@ -53,8 +56,13 @@ describe("UsageTrendChart (single metric)", () => {
     );
 
     const legend = screen.getByTestId("usage-trend-legend");
-    // 默认「Tokens」（与热力图一致），且不再有第二条「成本（右轴）」图例
-    expect(legend).toHaveTextContent("usage.trend.tokens");
+    // 默认「Tokens」+ 柱状图：柱内按模型堆叠，所以图例是总指标 + 模型区，
+    // 不再显示 token 类型占比；也不再有第二条「成本（右轴）」图例。
+    expect(legend.textContent).toBe("usage.trend.tokens");
+    const modelLegend = screen.getByTestId("usage-trend-model-legend");
+    expect(modelLegend.textContent).toContain("usage.trend.modelSection");
+    expect(modelLegend.textContent).toContain("gpt-5");
+    expect(modelLegend.textContent).toContain("claude-sonnet-4");
     expect(screen.queryByText(/usage.trend.costLine/)).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "usage.trend.cost" }));
@@ -120,7 +128,16 @@ describe("UsageTrendChart styles", () => {
       // A one-bucket range must still show a point in area mode.
       expect(container.querySelector(".recharts-area-dot")).not.toBeNull();
       expect(container.querySelector(".recharts-bar-rectangle")).toBeNull();
-      expect(screen.getByTestId("usage-trend-legend").textContent).toBe(legend);
+      if (metric === "tokens") {
+        // 面积图保留 token 类型占比图例；柱状图是模型堆叠，只显示总指标。
+        expect(screen.getByTestId("usage-trend-legend").textContent).toContain(
+          "usage.trend.legendHit",
+        );
+      } else {
+        expect(screen.getByTestId("usage-trend-legend").textContent).toBe(
+          legend,
+        );
+      }
 
       await user.click(bar);
       expect(bar).toHaveAttribute("aria-pressed", "true");
@@ -166,5 +183,78 @@ describe("UsageTrendChart styles", () => {
       screen.getByRole("button", { name: "usage.trend.bar" }),
     ).toHaveAttribute("aria-pressed", "true");
     expect(container.querySelector(".recharts-bar-rectangle")).not.toBeNull();
+  });
+});
+
+describe("UsageTrendChart tokens stacking", () => {
+  const props = {
+    range: { preset: "7d" as const },
+    rangeLabel: "7d",
+    refreshIntervalMs: 0,
+  };
+
+  it("stacks model totals in one bar per bucket and shows the model legend", () => {
+    const { container } = render(<UsageTrendChart {...props} />);
+
+    // tokens 是默认指标：每个模型一段 Bar（同一个 stackId），柱内按模型
+    // 的 token 总量堆叠，不再按 token 类型拆段，也不是并排多根柱。
+    const bars = container.querySelectorAll(".recharts-bar");
+    expect(bars).toHaveLength(2);
+    // 每个时间桶仍然只有一层柱形矩形组（分段堆在同一根柱里）。
+    expect(container.querySelectorAll(".recharts-bar-rectangles")).toHaveLength(
+      bars.length,
+    );
+
+    // 柱状图不显示 token 类型占比图例，只显示总指标 + 模型颜色。
+    expect(screen.getByTestId("usage-trend-legend").textContent).toBe(
+      "usage.trend.tokens",
+    );
+    const modelLegend = screen.getByTestId("usage-trend-model-legend");
+    expect(modelLegend.textContent).toContain("usage.trend.modelSection");
+    expect(modelLegend.textContent).toContain("gpt-5");
+    expect(modelLegend.textContent).toContain("claude-sonnet-4");
+  });
+
+  it("keeps token-type areas and adds one curve per model", async () => {
+    const user = userEvent.setup();
+    const { container } = render(<UsageTrendChart {...props} />);
+    await user.click(screen.getByRole("button", { name: "usage.trend.area" }));
+
+    // 4 段 token 类型堆叠面积 + 2 条模型曲线（fill=none，不加 stackId）。
+    const areas = container.querySelectorAll(".recharts-area");
+    expect(areas).toHaveLength(6);
+    expect(container.querySelectorAll(".usage-trend-model-curve")).toHaveLength(
+      2,
+    );
+
+    // 面积图图例同时包含 token 类型和模型。
+    const legend = screen.getByTestId("usage-trend-legend");
+    expect(legend.textContent).toContain("usage.trend.legendHit");
+    expect(legend.textContent).toContain("usage.trend.legendOutput");
+    const modelLegend = screen.getByTestId("usage-trend-model-legend");
+    expect(modelLegend.textContent).toContain("gpt-5");
+    expect(modelLegend.textContent).toContain("claude-sonnet-4");
+  });
+
+  it("keeps requests and cost as single-series charts", async () => {
+    const user = userEvent.setup();
+    const { container } = render(<UsageTrendChart {...props} />);
+
+    for (const metric of ["requests", "cost"] as const) {
+      await user.click(
+        screen.getByRole("button", { name: `usage.trend.${metric}` }),
+      );
+      // 回到单序列：Bar + Area 一共只有一段（图表样式沿用记忆值，所以
+      // 只断言「不是 4 段堆叠」且总共 1 个序列）。
+      const seriesCount =
+        container.querySelectorAll(".recharts-bar").length +
+        container.querySelectorAll(".recharts-area").length;
+      expect(seriesCount).toBe(1);
+      expect(screen.getByTestId("usage-trend-legend").textContent).toBe(
+        metric === "requests"
+          ? "usage.trend.requestsLegend"
+          : "usage.trend.cost",
+      );
+    }
   });
 });

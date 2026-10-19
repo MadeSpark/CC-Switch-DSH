@@ -2377,7 +2377,17 @@
       "requests": "İstekler",
       "tokens": "Tokenlar",
       "cost": "Maliyet",
-      "requestsLegend": "İstekler"
+      "requestsLegend": "İstekler",
+      "tokenHit": "Girdi (önbellek isabeti)",
+      "tokenMiss": "Girdi (önbellek ıskalaması)",
+      "tokenWrite": "Önbellek yazma",
+      "tokenOutput": "Çıktı",
+      "legendHit": "Önbellek isabeti",
+      "legendMiss": "Iskalama",
+      "legendWrite": "Önbellek yazma",
+      "legendOutput": "Çıktı",
+      "modelSection": "Modeller",
+      "moreModels": "{{count}} model daha"
     },
     "tabs": {
       "label": "Ayrıntılar",
@@ -4875,6 +4885,7 @@
   "dshReasoning": {
     "label": "Akıl yürütme",
     "notSet": "Ayarlanmadı",
+    "disabled": "Kapalı",
     "chipWire": "Gönderilen: {{wire}}",
     "chipSilent": "Akıl yürütme parametresi gönderilmez",
     "noParam": "Gönderilmez",

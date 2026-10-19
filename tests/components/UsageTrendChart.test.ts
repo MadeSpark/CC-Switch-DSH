@@ -1,9 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
+  attachUsageTrendModelValues,
   buildUsageTrendChartData,
+  buildUsageTrendModelSeries,
   formatUsageTrendTokenTickLabel,
   formatUsageTrendTickLabel,
 } from "@/components/usage/UsageTrendChart";
+import {
+  buildUsageTrendModelRows,
+  buildUsageTrendTokenRows,
+} from "@/components/usage/UsageTrendTooltip";
 
 const day = (isoDate: string) =>
   ({
@@ -146,5 +152,233 @@ describe("formatUsageTrendTokenTickLabel", () => {
     expect(formatUsageTrendTokenTickLabel(0, "zh", "zh-CN")).toBe("0");
     expect(formatUsageTrendTokenTickLabel(1500, "intl", "en-US")).toBe("1.5K");
     expect(formatUsageTrendTokenTickLabel(null, "intl", "en-US")).toBe("--");
+  });
+});
+
+describe("buildUsageTrendTokenRows", () => {
+  const point = {
+    tooltipLabel: "2026/09/30",
+    cacheReadTokens: 768,
+    inputTokens: 13104,
+    cacheCreationTokens: 0,
+    outputTokens: 1703,
+  };
+
+  it("lists the four token rows with full integers and stable colors", () => {
+    const rows = buildUsageTrendTokenRows(
+      {
+        ...point,
+        cacheCreationTokens: 256,
+      },
+      true,
+    );
+    expect(rows.map((row) => row.value)).toEqual([768, 13104, 256, 1703]);
+    expect(rows.map((row) => row.color)).toEqual([
+      "#93C5FD",
+      "#3B82F6",
+      "#2563EB",
+      "#1E40AF",
+    ]);
+    expect(rows.map((row) => row.labelKey)).toEqual([
+      "usage.trend.tokenHit",
+      "usage.trend.tokenMiss",
+      "usage.trend.tokenWrite",
+      "usage.trend.tokenOutput",
+    ]);
+  });
+
+  it("hides the cache-write row when the whole series has no cache creation", () => {
+    const rows = buildUsageTrendTokenRows(point, false);
+    expect(rows.map((row) => row.key)).toEqual([
+      "cacheRead",
+      "input",
+      "output",
+    ]);
+  });
+
+  it("returns no rows without a point", () => {
+    expect(buildUsageTrendTokenRows(undefined, true)).toEqual([]);
+  });
+});
+
+describe("buildUsageTrendModelRows", () => {
+  const models = [
+    { model: "claude-sonnet-4", totalTokens: 5000 },
+    { model: "gpt-5", totalTokens: 4000 },
+    { model: "gemini-2.5-pro", totalTokens: 3000 },
+    { model: "deepseek-v3", totalTokens: 2000 },
+    { model: "qwen3-max", totalTokens: 1000 },
+    { model: "kimi-k2", totalTokens: 500 },
+    { model: "glm-4.6", totalTokens: 100 },
+  ];
+
+  it("returns every model when under the default limit", () => {
+    const rows = buildUsageTrendModelRows(models);
+    expect(rows).toHaveLength(7);
+    expect(rows?.every((row) => row.model != null)).toBe(true);
+  });
+
+  it("keeps the limit and aggregates the rest into an others row", () => {
+    const rows = buildUsageTrendModelRows(models, 6);
+    expect(rows).toHaveLength(6);
+    expect(rows?.slice(0, 5).map((row) => row.model)).toEqual([
+      "claude-sonnet-4",
+      "gpt-5",
+      "gemini-2.5-pro",
+      "deepseek-v3",
+      "qwen3-max",
+    ]);
+    const others = rows?.[5];
+    expect(others?.model).toBeNull();
+    expect(others?.count).toBe(2);
+    expect(others?.totalTokens).toBe(600);
+  });
+
+  it("returns all rows when under the limit", () => {
+    const rows = buildUsageTrendModelRows(models.slice(0, 3));
+    expect(rows).toHaveLength(3);
+    expect(rows?.every((row) => row.model != null)).toBe(true);
+    expect(rows?.map((row) => row.totalTokens)).toEqual([5000, 4000, 3000]);
+  });
+
+  it("gives each model a stable color derived from its name", () => {
+    const rows = buildUsageTrendModelRows(models.slice(0, 2));
+    const again = buildUsageTrendModelRows(models.slice(0, 2));
+    expect(rows?.[0].color).toBe(again?.[0].color);
+    expect(rows?.[0].color).not.toBe(rows?.[1].color);
+  });
+
+  it("returns null without model data", () => {
+    expect(buildUsageTrendModelRows(undefined)).toBeNull();
+    expect(buildUsageTrendModelRows([])).toBeNull();
+  });
+});
+
+describe("buildUsageTrendModelSeries", () => {
+  const startDate = Math.floor(Date.parse("2026-09-01T00:00:00Z") / 1000);
+  const endDate = Math.floor(Date.parse("2026-09-30T00:00:00Z") / 1000);
+  const chartData = buildUsageTrendChartData(
+    [
+      {
+        ...day("2026-09-01"),
+        models: [
+          { model: "alpha", totalTokens: 100 },
+          { model: "beta", totalTokens: 50 },
+        ],
+      },
+      {
+        ...day("2026-09-02"),
+        models: [
+          { model: "alpha", totalTokens: 20 },
+          { model: "gamma", totalTokens: 30 },
+        ],
+      },
+    ],
+    { isHourly: false, dateLocale: "en-US", startDate, endDate },
+  );
+
+  it("orders models by total and fills missing days with zero", () => {
+    const series = buildUsageTrendModelSeries(chartData);
+    expect(series.map((entry) => entry.model)).toEqual([
+      "alpha",
+      "beta",
+      "gamma",
+    ]);
+    expect(series.map((entry) => entry.totalTokens)).toEqual([120, 50, 30]);
+    expect(new Set(series.map((entry) => entry.color)).size).toBe(3);
+
+    const rows = attachUsageTrendModelValues(chartData, series);
+    expect(rows[0].modelValues).toMatchObject({
+      "model-0": 100,
+      "model-1": 50,
+      "model-2": 0,
+    });
+    expect(rows[1].modelValues).toMatchObject({
+      "model-0": 20,
+      "model-1": 0,
+      "model-2": 30,
+    });
+  });
+
+  it("uses a custom limit and aggregates the tail into an others series", () => {
+    const many = buildUsageTrendChartData(
+      [
+        {
+          ...day("2026-09-03"),
+          models: Array.from({ length: 12 }, (_, index) => ({
+            model: `model-${index}`,
+            totalTokens: 1000 - index * 10,
+          })),
+        },
+      ],
+      { isHourly: false, dateLocale: "en-US", startDate, endDate },
+    );
+    const series = buildUsageTrendModelSeries(many, 3);
+    expect(series).toHaveLength(3);
+    expect(series[0].model).toBe("model-0");
+    expect(series[1].model).toBe("model-1");
+    expect(series[2].model).toBeNull();
+    expect(series[2].count).toBe(10);
+    expect(series[2].totalTokens).toBe(
+      Array.from({ length: 10 }, (_, index) => 980 - index * 10).reduce(
+        (sum, value) => sum + value,
+        0,
+      ),
+    );
+
+    const rows = attachUsageTrendModelValues(many, series);
+    expect(rows[0].modelValues["model-other"]).toBe(series[2].totalTokens);
+  });
+
+  it("returns no series when the backend omits the breakdown", () => {
+    const plain = buildUsageTrendChartData([day("2026-09-04")], {
+      isHourly: false,
+      dateLocale: "en-US",
+      startDate,
+      endDate,
+    });
+    expect(buildUsageTrendModelSeries(plain)).toEqual([]);
+  });
+});
+
+describe("buildUsageTrendChartData models mapping", () => {
+  it("maps the per-model breakdown into chart points", () => {
+    const startDate = Math.floor(Date.parse("2026-09-01T00:00:00Z") / 1000);
+    const endDate = Math.floor(Date.parse("2026-09-30T00:00:00Z") / 1000);
+    const points = buildUsageTrendChartData(
+      [
+        {
+          date: "2026-09-30T12:00:00.000Z",
+          totalInputTokens: 100,
+          totalOutputTokens: 50,
+          totalCacheCreationTokens: 0,
+          totalCacheReadTokens: 0,
+          totalCost: "0.01",
+          models: [
+            { model: "gpt-5", totalTokens: 100 },
+            { model: "claude-sonnet-4", totalTokens: 50 },
+          ],
+        },
+      ],
+      { isHourly: false, dateLocale: "en-US", startDate, endDate },
+    );
+
+    expect(points[0].models).toEqual([
+      { model: "gpt-5", totalTokens: 100 },
+      { model: "claude-sonnet-4", totalTokens: 50 },
+    ]);
+  });
+
+  it("leaves models undefined when the backend omits the breakdown", () => {
+    const startDate = Math.floor(Date.parse("2026-09-01T00:00:00Z") / 1000);
+    const endDate = Math.floor(Date.parse("2026-09-30T00:00:00Z") / 1000);
+    const points = buildUsageTrendChartData([day("2026-09-15")], {
+      isHourly: false,
+      dateLocale: "en-US",
+      startDate,
+      endDate,
+    });
+
+    expect(points[0].models).toBeUndefined();
   });
 });

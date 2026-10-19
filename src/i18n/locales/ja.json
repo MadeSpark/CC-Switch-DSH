@@ -2468,7 +2468,17 @@
       "requests": "リクエスト",
       "tokens": "Tokens",
       "cost": "コスト",
-      "requestsLegend": "リクエスト数"
+      "requestsLegend": "リクエスト数",
+      "tokenHit": "入力（キャッシュヒット）",
+      "tokenMiss": "入力（キャッシュミス）",
+      "tokenWrite": "キャッシュ書き込み",
+      "tokenOutput": "出力",
+      "legendHit": "キャッシュヒット",
+      "legendMiss": "キャッシュミス",
+      "legendWrite": "キャッシュ書き込み",
+      "legendOutput": "出力",
+      "modelSection": "モデル",
+      "moreModels": "その他 {{count}} 個のモデル"
     },
     "tabs": {
       "label": "明細",
@@ -4987,6 +4997,7 @@
   "dshReasoning": {
     "label": "推論レベル",
     "notSet": "未設定",
+    "disabled": "無効",
     "chipWire": "送信値：{{wire}}",
     "chipSilent": "思考パラメータを送信しません",
     "noParam": "送信しません",

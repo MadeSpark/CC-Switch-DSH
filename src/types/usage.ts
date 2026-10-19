@@ -101,6 +101,12 @@ export interface UsageSummaryByApp {
   summary: UsageSummary;
 }
 
+/** 时间桶内单个模型的真实消耗 Tokens（新增输入 + 输出 + 缓存写入 + 缓存命中） */
+export interface ModelTokenUsage {
+  model: string;
+  totalTokens: number;
+}
+
 export interface DailyStats {
   date: string;
   requestCount: number;
@@ -110,6 +116,8 @@ export interface DailyStats {
   totalOutputTokens: number;
   totalCacheCreationTokens: number;
   totalCacheReadTokens: number;
+  /** 该时间桶内按模型拆分的真实消耗 Tokens，按总量降序；按具体模型筛选时为空 */
+  models?: ModelTokenUsage[];
 }
 
 export interface ProviderStats {

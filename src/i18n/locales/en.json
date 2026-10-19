@@ -2468,7 +2468,17 @@
       "requests": "Requests",
       "tokens": "Tokens",
       "cost": "Cost",
-      "requestsLegend": "Requests"
+      "requestsLegend": "Requests",
+      "tokenHit": "Input (cache hit)",
+      "tokenMiss": "Input (cache miss)",
+      "tokenWrite": "Cache write",
+      "tokenOutput": "Output",
+      "legendHit": "Cache hit",
+      "legendMiss": "Cache miss",
+      "legendWrite": "Cache write",
+      "legendOutput": "Output",
+      "modelSection": "Models",
+      "moreModels": "{{count}} more models"
     },
     "tabs": {
       "label": "Details",
@@ -4987,6 +4997,7 @@
   "dshReasoning": {
     "label": "Reasoning",
     "notSet": "Not set",
+    "disabled": "Disabled",
     "chipWire": "Sends: {{wire}}",
     "chipSilent": "No reasoning parameter is sent",
     "noParam": "Not sent",

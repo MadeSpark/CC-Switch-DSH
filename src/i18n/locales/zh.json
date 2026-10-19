@@ -2468,7 +2468,17 @@
       "requests": "请求",
       "tokens": "Tokens",
       "cost": "成本",
-      "requestsLegend": "请求数"
+      "requestsLegend": "请求数",
+      "tokenHit": "输入（命中缓存）",
+      "tokenMiss": "输入（未命中缓存）",
+      "tokenWrite": "缓存写入",
+      "tokenOutput": "输出",
+      "legendHit": "命中缓存",
+      "legendMiss": "未命中",
+      "legendWrite": "缓存写入",
+      "legendOutput": "输出",
+      "modelSection": "模型",
+      "moreModels": "其他 {{count}} 个模型"
     },
     "tabs": {
       "label": "明细",
@@ -4987,6 +4997,7 @@
   "dshReasoning": {
     "label": "推理等级",
     "notSet": "未设置",
+    "disabled": "已禁用",
     "chipWire": "发送值：{{wire}}",
     "chipSilent": "不发送思考参数",
     "noParam": "不发送",

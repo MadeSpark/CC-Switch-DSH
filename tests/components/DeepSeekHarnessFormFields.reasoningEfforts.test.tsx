@@ -440,6 +440,8 @@ describe("DeepSeekHarnessFormFields 推理等级推荐表", () => {
         api,
       });
 
+      // 预设/自适应/清除都在推理面板底部，先展开再点。
+      openLevels();
       fireEvent.click(
         screen.getByRole("button", { name: usePresetLabel(family) }),
       );
@@ -470,6 +472,7 @@ describe("DeepSeekHarnessFormFields 推理等级推荐表", () => {
       initialModels: [{ id: modelId, name: "M", rowKey: "r1" }],
     });
 
+    openLevels();
     expect(
       screen.queryByRole("button", { name: /^Use .+ preset$/ }),
     ).toBeNull();
@@ -485,6 +488,7 @@ describe("DeepSeekHarnessFormFields 推理等级推荐表", () => {
       api: "openai-completions",
     });
 
+    openLevels();
     fireEvent.click(
       screen.getByRole("button", { name: usePresetLabel("Claude") }),
     );
@@ -514,6 +518,7 @@ describe("DeepSeekHarnessFormFields 推理等级推荐表", () => {
       api: "anthropic-messages",
     });
 
+    openLevels();
     fireEvent.click(
       screen.getByRole("button", { name: usePresetLabel("Claude") }),
     );
@@ -722,6 +727,9 @@ describe("DeepSeekHarnessFormFields 推理等级面板", () => {
       ],
     });
 
+    // 行内只保留一个触发器，禁用状态也在面板底部说明。
+    expect(levelTrigger().textContent).toContain("Disabled");
+    openLevels();
     expect(screen.getByText(FORCED_OFF)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: CLEAR }));
 
@@ -745,6 +753,7 @@ describe("DeepSeekHarnessFormFields 推理等级面板", () => {
       ],
     });
 
+    openLevels();
     fireEvent.click(screen.getByRole("button", { name: CLEAR }));
 
     const model = currentModel();
