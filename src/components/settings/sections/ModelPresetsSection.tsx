@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { Copy, Pencil, Plus, Trash2 } from "lucide-react";
+import { Copy, Download, Pencil, Plus, Trash2 } from "lucide-react";
 import { V7ConfirmDialog, V7Dialog } from "@/components/mcp/formBits";
+import { ImportDshModelPresetDialog } from "@/components/model-presets/ImportDshModelPresetDialog";
 import {
   SettingsBlock,
   SettingsCard,
@@ -292,11 +293,13 @@ function ParamFields({
  */
 export function ModelPresetsSection() {
   const { t } = useTranslation();
-  const { presets, generic, save, isSaving } = useModelPresets();
+  const { presets, generic, save, isSaving, isLoading, isError, refetch } =
+    useModelPresets();
 
   const [editor, setEditor] = useState<PresetDraft | null>(null);
   const [editorError, setEditorError] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ModelPreset | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
   const [genericDraft, setGenericDraft] = useState<ParamFieldsDraft>(() =>
     paramFieldsFromParams(generic),
   );
@@ -413,6 +416,18 @@ export function ModelPresetsSection() {
     await persist(presets, parsed.params, t("modelPresets.saved"));
   }, [genericDraft, persist, presets, t]);
 
+  const handleImportPresets = useCallback(
+    async (imported: ModelPreset[]): Promise<boolean> => {
+      if (isLoading || isError || imported.length === 0) return false;
+      return persist(
+        [...presets, ...imported],
+        generic,
+        t("modelPresets.saved"),
+      );
+    },
+    [generic, isLoading, isError, persist, presets, t],
+  );
+
   const handleToggleGenericPrompt = useCallback((enabled: boolean) => {
     setGenericPromptEnabled(enabled);
     writeGenericPromptEnabled(enabled);
@@ -427,18 +442,52 @@ export function ModelPresetsSection() {
           body: t("modelPresets.description"),
         }}
         actions={
-          <Button
-            type="button"
-            variant="neutral"
-            size="compact"
-            disabled={isSaving}
-            onClick={openCreate}
-          >
-            <Plus className="h-3.5 w-3.5" aria-hidden="true" />
-            {t("modelPresets.addPreset")}
-          </Button>
+          <>
+            <Button
+              type="button"
+              variant="neutral"
+              size="compact"
+              disabled={isSaving || isLoading || isError}
+              onClick={() => setImportOpen(true)}
+            >
+              <Download className="h-3.5 w-3.5" aria-hidden="true" />
+              {t("modelPresets.import.open", {
+                defaultValue: "从已配置供应商导入",
+              })}
+            </Button>
+            <Button
+              type="button"
+              variant="neutral"
+              size="compact"
+              disabled={isSaving}
+              onClick={openCreate}
+            >
+              <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+              {t("modelPresets.addPreset")}
+            </Button>
+          </>
         }
       >
+        {isError && (
+          <div
+            className="flex items-center gap-3 text-caption text-danger-text"
+            role="alert"
+          >
+            <span>
+              {t("modelPresets.import.loadPresetsFailed", {
+                defaultValue: "读取已有预设失败，请重试后再导入。",
+              })}
+            </span>
+            <Button
+              type="button"
+              variant="quiet"
+              size="compact"
+              onClick={refetch}
+            >
+              {t("modelPresets.import.retry", { defaultValue: "重试" })}
+            </Button>
+          </div>
+        )}
         <SettingsCard>
           {presets.length === 0 ? (
             <SettingsRow
@@ -728,6 +777,14 @@ export function ModelPresetsSection() {
           </div>
         </V7Dialog>
       )}
+
+      <ImportDshModelPresetDialog
+        open={importOpen}
+        presets={presets}
+        isSaving={isSaving}
+        onClose={() => setImportOpen(false)}
+        onSave={handleImportPresets}
+      />
 
       <V7ConfirmDialog
         open={deleteTarget !== null}

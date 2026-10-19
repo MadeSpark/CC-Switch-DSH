@@ -261,6 +261,21 @@ describe("useModelPresetPrompt", () => {
 });
 
 describe("ModelPresetsSection", () => {
+  it("已有预设读取失败时禁用导入，重试恢复后保留已有数据", async () => {
+    setupPresets({ presets: [deepseekPreset], generic: { temperature: 0.2 } });
+    getMock.mockRejectedValueOnce(new Error("fixture loading failure"));
+    renderWithQueryClient(<ModelPresetsSection />);
+    await screen.findByRole("alert");
+    const importButton = screen.getByRole("button", {
+      name: "从已配置供应商导入",
+    });
+    expect(importButton).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "重试" }));
+    await screen.findByText("DeepSeek V4 Pro");
+    await waitFor(() => expect(importButton).toBeEnabled());
+    expect(saveMock).not.toHaveBeenCalled();
+  });
+
   it("渲染预设列表和通用参数并提供添加 / 编辑 / 删除 / 复制入口", async () => {
     setupPresets({ presets: [deepseekPreset], generic: { temperature: 0.2 } });
     renderWithQueryClient(<ModelPresetsSection />);

@@ -6,6 +6,7 @@ import { FormLabel } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { ImeSafeInput } from "@/components/ui/ime-safe-input";
 import { Button } from "@/components/ui/button";
+import { DshModelPresetMatchDialog } from "@/components/model-presets/DshModelPresetMatchDialog";
 import {
   Popover,
   PopoverContent,
@@ -335,6 +336,7 @@ export function DeepSeekHarnessFormFields({
 
   const [fetchedModels, setFetchedModels] = useState<FetchedModel[]>([]);
   const [isFetchingModels, setIsFetchingModels] = useState(false);
+  const [presetMatchOpen, setPresetMatchOpen] = useState(false);
 
   /** 点等级行：加/减一个等级；全减完就删掉整个字段（回到「未设置」）。 */
   const handleToggleReasoningLevel = (index: number, level: string) => {
@@ -619,7 +621,17 @@ export function DeepSeekHarnessFormFields({
               defaultValue: "Model Catalog",
             })}
           </FormLabel>
-          <div className="flex gap-1">
+          <div className="flex flex-wrap justify-end gap-1">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-7"
+              disabled={!models.some((model) => model.id.trim())}
+              onClick={() => setPresetMatchOpen(true)}
+            >
+              {t("modelPresets.match.open", { defaultValue: "一键匹配预设" })}
+            </Button>
             <FetchedModelPicker
               models={fetchedModels}
               configuredModelIds={models.map((model) => model.id)}
@@ -640,6 +652,14 @@ export function DeepSeekHarnessFormFields({
             </Button>
           </div>
         </div>
+
+        {presetMatchOpen && (
+          <DshModelPresetMatchDialog
+            models={models}
+            onApply={onModelsChange}
+            onClose={() => setPresetMatchOpen(false)}
+          />
+        )}
 
         {models.length === 0 ? (
           <p className="text-sm text-muted-foreground py-2">
