@@ -48,8 +48,10 @@ use crate::services::usage_stats::find_model_pricing;
 const APP_TYPE: &str = "dsh";
 /// `data_source` marker distinguishing imported rows from proxy rows.
 const DATA_SOURCE: &str = "dsh_session";
-/// Placeholder provider id; Harness routes do not have CC Switch provider rows.
+/// Placeholder provider id used when the Harness provider has no CC Switch row.
 const PROVIDER_PLACEHOLDER: &str = "_dsh_session";
+/// `app_type` under which DeepSeek Harness provider configs live in `providers`.
+const PROVIDER_APP_TYPE: &str = "deepseek-harness";
 /// Log file name inside each session directory.
 const SESSION_FILE_NAME: &str = "session.v4.jsonl.zstd";
 /// Session root relative to `$DSH_HOME`.
@@ -68,13 +70,13 @@ pub fn sync_dsh_sessions(
     db: &Database,
     sessions_root: &Path,
 ) -> Result<SessionSyncResult, AppError> {
-    if !sessions_root.is_dir() {
-        return Ok(SessionSyncResult::default());
-    }
-    let files = collect_session_files(sessions_root);
-    if files.is_empty() {
-        return Ok(SessionSyncResult::default());
-    }
+    // 没有会话文件也要进事务：历史行的 provider_id 回填挂在 `sync_files` 里，
+    // 用户删掉会话目录、或刚装好还没产生用量时同样需要跑一次（回填是幂等的）。
+    let files = if sessions_root.is_dir() {
+        collect_session_files(sessions_root)
+    } else {
+        Vec::new()
+    };
     let cursors = load_sync_cursors(db)?;
     sync_files(db, &files, &cursors)
 }
@@ -124,6 +126,9 @@ fn sync_files(
     let mut result = SessionSyncResult::default();
     let mut conn = lock_conn!(db.conn);
     let tx = conn.transaction()?;
+    // 先回填历史行，再导入新行；两步都在同一事务里，失败时一起回滚。
+    backfill_provider_ids(&tx)?;
+    let mut provider_cache: HashMap<String, String> = HashMap::new();
 
     for path in files {
         result.files_scanned = result.files_scanned.saturating_add(1);
@@ -155,7 +160,7 @@ fn sync_files(
             if !record.usage.has_billable_tokens() {
                 continue;
             }
-            let changed = insert_record(&tx, record)?;
+            let changed = insert_record(&tx, record, &mut provider_cache)?;
             if changed {
                 result.imported = result.imported.saturating_add(1);
             } else {
@@ -300,8 +305,67 @@ fn parse_usage(usage: &Value) -> Option<TokenUsage> {
     })
 }
 
+/// Resolve a Harness provider key to a `providers.id` that really exists for
+/// `app_type = 'deepseek-harness'`; otherwise keep the session placeholder.
+///
+/// The cache is per sync pass: one `SELECT EXISTS` per distinct provider key,
+/// not per imported record.
+fn resolve_provider_id(
+    conn: &rusqlite::Connection,
+    provider: Option<&str>,
+    cache: &mut HashMap<String, String>,
+) -> Result<String, AppError> {
+    let Some(provider) = provider.filter(|value| !value.is_empty()) else {
+        return Ok(PROVIDER_PLACEHOLDER.to_string());
+    };
+    if let Some(resolved) = cache.get(provider) {
+        return Ok(resolved.clone());
+    }
+    let registered: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM providers WHERE id = ?1 AND app_type = ?2)",
+        params![provider, PROVIDER_APP_TYPE],
+        |row| row.get(0),
+    )?;
+    let resolved = if registered {
+        provider.to_string()
+    } else {
+        PROVIDER_PLACEHOLDER.to_string()
+    };
+    cache.insert(provider.to_string(), resolved.clone());
+    Ok(resolved)
+}
+
+/// Backfill `provider_id` for historical Harness session rows (idempotent).
+///
+/// Older builds always wrote the placeholder into `provider_id` and kept the
+/// real Harness key in `provider_type`. Replace it only when a matching
+/// `(id, 'deepseek-harness')` provider row exists, and only for
+/// `data_source = 'dsh_session'` rows, so proxy rows and other apps' session
+/// rows (which have their own placeholders) are never touched.
+fn backfill_provider_ids(conn: &rusqlite::Connection) -> Result<usize, AppError> {
+    let changed = conn.execute(
+        "UPDATE proxy_request_logs
+            SET provider_id = provider_type
+          WHERE data_source = ?1
+            AND provider_id = ?2
+            AND provider_type IS NOT NULL
+            AND provider_type <> ?2
+            AND EXISTS (
+                SELECT 1 FROM providers p
+                 WHERE p.id = proxy_request_logs.provider_type
+                   AND p.app_type = ?3
+            )",
+        params![DATA_SOURCE, PROVIDER_PLACEHOLDER, PROVIDER_APP_TYPE],
+    )?;
+    Ok(changed)
+}
+
 /// Insert one usage row; returns `false` when the request id was already known.
-fn insert_record(conn: &rusqlite::Connection, record: &DshUsageRecord) -> Result<bool, AppError> {
+fn insert_record(
+    conn: &rusqlite::Connection,
+    record: &DshUsageRecord,
+    provider_cache: &mut HashMap<String, String>,
+) -> Result<bool, AppError> {
     let exists = conn
         .query_row(
             "SELECT 1 FROM proxy_request_logs WHERE request_id = ?1 AND data_source = ?2",
@@ -341,6 +405,7 @@ fn insert_record(conn: &rusqlite::Connection, record: &DshUsageRecord) -> Result
         .provider
         .clone()
         .unwrap_or_else(|| DATA_SOURCE.into());
+    let provider_id = resolve_provider_id(conn, record.provider.as_deref(), provider_cache)?;
     let changed = conn.execute(
         "INSERT OR IGNORE INTO proxy_request_logs (
             request_id, provider_id, app_type, model, request_model,
@@ -353,7 +418,7 @@ fn insert_record(conn: &rusqlite::Connection, record: &DshUsageRecord) -> Result
                    1, '1', ?16, ?17, ?18)",
         params![
             record.record_id,
-            PROVIDER_PLACEHOLDER,
+            provider_id,
             APP_TYPE,
             record.model,
             record.usage.input_tokens,
@@ -678,6 +743,237 @@ mod tests {
         let db = Database::memory()?;
         let result = sync_dsh_sessions(&db, Path::new("Z:/definitely/not/there"))?;
         assert_eq!(result.imported, 0);
+        Ok(())
+    }
+
+    fn provider_row(conn: &rusqlite::Connection, id: &str, app_type: &str, name: &str) {
+        conn.execute(
+            "INSERT INTO providers (id, app_type, name, settings_config)
+             VALUES (?1, ?2, ?3, '{}')",
+            params![id, app_type, name],
+        )
+        .unwrap();
+    }
+
+    /// 模拟旧版本写入的行：`provider_id` 恒为占位符，真实 key 只在 `provider_type`。
+    fn insert_legacy_row(
+        conn: &rusqlite::Connection,
+        request_id: &str,
+        provider_id: &str,
+        provider_type: Option<&str>,
+        app_type: &str,
+        data_source: &str,
+    ) {
+        conn.execute(
+            "INSERT INTO proxy_request_logs (
+                request_id, provider_id, app_type, model, latency_ms, status_code,
+                provider_type, created_at, data_source
+             ) VALUES (?1, ?2, ?3, 'deepseek-v4.1-flash', 0, 200, ?4, 1000, ?5)",
+            params![
+                request_id,
+                provider_id,
+                app_type,
+                provider_type,
+                data_source
+            ],
+        )
+        .unwrap();
+    }
+
+    fn provider_id_of(conn: &rusqlite::Connection, request_id: &str) -> String {
+        conn.query_row(
+            "SELECT provider_id FROM proxy_request_logs WHERE request_id = ?1",
+            [request_id],
+            |row| row.get(0),
+        )
+        .unwrap()
+    }
+
+    fn write_single_message_session(root: &Path, session_name: &str) {
+        let session = session_dir(root, session_name);
+        let mut file = fs::File::create(session.join(SESSION_FILE_NAME)).unwrap();
+        write_frame(
+            &mut file,
+            &[message_line(1, "m-1", "deepseek-v4.1-flash", 100, 20, 0)],
+        );
+        file.flush().unwrap();
+    }
+
+    #[test]
+    fn deepseek_harness_import_uses_registered_provider_id() -> Result<(), AppError> {
+        let dir = std::env::temp_dir().join("ccs-dsh-usage-provider-id");
+        let _ = fs::remove_dir_all(&dir);
+        write_single_message_session(&dir, "session-provider");
+
+        let db = Database::memory()?;
+        {
+            let conn = db.conn.lock().unwrap();
+            provider_row(&conn, "tx", "deepseek-harness", "TX Relay");
+        }
+
+        let result = sync_dsh_sessions(&db, &dir)?;
+        assert_eq!(result.imported, 1);
+        {
+            let conn = db.conn.lock().unwrap();
+            let (provider_id, provider_type) = conn.query_row(
+                "SELECT provider_id, provider_type FROM proxy_request_logs WHERE app_type = 'dsh'",
+                [],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )?;
+            assert_eq!(provider_id, "tx");
+            // 真实 key 仍然留在 provider_type，供历史回填与排障使用。
+            assert_eq!(provider_type, "tx");
+        }
+
+        let again = sync_dsh_sessions(&db, &dir)?;
+        assert_eq!(again.imported, 0, "re-running must dedupe by request_id");
+        let _ = fs::remove_dir_all(&dir);
+        Ok(())
+    }
+
+    #[test]
+    fn deepseek_harness_import_falls_back_when_provider_is_another_app() -> Result<(), AppError> {
+        let dir = std::env::temp_dir().join("ccs-dsh-usage-provider-other-app");
+        let _ = fs::remove_dir_all(&dir);
+        write_single_message_session(&dir, "session-other-app");
+
+        let db = Database::memory()?;
+        {
+            let conn = db.conn.lock().unwrap();
+            // providers 主键是 (id, app_type)：同 id 属于别的应用不算 DSH provider。
+            provider_row(&conn, "tx", "claude", "Claude TX");
+        }
+
+        let result = sync_dsh_sessions(&db, &dir)?;
+        assert_eq!(result.imported, 1);
+        {
+            let conn = db.conn.lock().unwrap();
+            let (provider_id, provider_type) = conn.query_row(
+                "SELECT provider_id, provider_type FROM proxy_request_logs WHERE app_type = 'dsh'",
+                [],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )?;
+            assert_eq!(provider_id, PROVIDER_PLACEHOLDER);
+            assert_eq!(provider_type, "tx");
+        }
+
+        let _ = fs::remove_dir_all(&dir);
+        Ok(())
+    }
+
+    #[test]
+    fn deepseek_harness_backfill_is_idempotent_and_scoped() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        {
+            let conn = db.conn.lock().unwrap();
+            provider_row(&conn, "tx", "deepseek-harness", "TX Relay");
+            provider_row(&conn, "only-claude", "claude", "Claude Only");
+            insert_legacy_row(
+                &conn,
+                "qualifying",
+                PROVIDER_PLACEHOLDER,
+                Some("tx"),
+                "dsh",
+                DATA_SOURCE,
+            );
+            insert_legacy_row(
+                &conn,
+                "unknown-provider",
+                PROVIDER_PLACEHOLDER,
+                Some("ghost"),
+                "dsh",
+                DATA_SOURCE,
+            );
+            insert_legacy_row(
+                &conn,
+                "null-provider-type",
+                PROVIDER_PLACEHOLDER,
+                None,
+                "dsh",
+                DATA_SOURCE,
+            );
+            insert_legacy_row(
+                &conn,
+                "other-app-provider",
+                PROVIDER_PLACEHOLDER,
+                Some("only-claude"),
+                "dsh",
+                DATA_SOURCE,
+            );
+            insert_legacy_row(
+                &conn,
+                "proxy-row",
+                PROVIDER_PLACEHOLDER,
+                Some("tx"),
+                "dsh",
+                "proxy",
+            );
+            insert_legacy_row(&conn, "already-real", "tx", Some("tx"), "dsh", DATA_SOURCE);
+            insert_legacy_row(
+                &conn,
+                "codex-session",
+                "_codex_session",
+                Some("tx"),
+                "codex",
+                "codex_session",
+            );
+        }
+
+        let first = {
+            let conn = db.conn.lock().unwrap();
+            backfill_provider_ids(&conn)?
+        };
+        assert_eq!(
+            first, 1,
+            "only the registered DSH session row is backfilled"
+        );
+        let second = {
+            let conn = db.conn.lock().unwrap();
+            backfill_provider_ids(&conn)?
+        };
+        assert_eq!(second, 0, "backfill must be idempotent");
+
+        {
+            let conn = db.conn.lock().unwrap();
+            assert_eq!(provider_id_of(&conn, "qualifying"), "tx");
+            assert_eq!(
+                provider_id_of(&conn, "unknown-provider"),
+                PROVIDER_PLACEHOLDER
+            );
+            assert_eq!(
+                provider_id_of(&conn, "null-provider-type"),
+                PROVIDER_PLACEHOLDER
+            );
+            assert_eq!(
+                provider_id_of(&conn, "other-app-provider"),
+                PROVIDER_PLACEHOLDER
+            );
+            assert_eq!(provider_id_of(&conn, "proxy-row"), PROVIDER_PLACEHOLDER);
+            assert_eq!(provider_id_of(&conn, "already-real"), "tx");
+            assert_eq!(provider_id_of(&conn, "codex-session"), "_codex_session");
+        }
+
+        // 同步事务本身也要跑回填：即使会话目录为空/不存在。
+        {
+            let conn = db.conn.lock().unwrap();
+            insert_legacy_row(
+                &conn,
+                "qualifying-on-sync",
+                PROVIDER_PLACEHOLDER,
+                Some("tx"),
+                "dsh",
+                DATA_SOURCE,
+            );
+        }
+        let empty_root = std::env::temp_dir().join("ccs-dsh-usage-empty-root");
+        let _ = fs::remove_dir_all(&empty_root);
+        let result = sync_dsh_sessions(&db, &empty_root)?;
+        assert_eq!(result.imported, 0);
+        {
+            let conn = db.conn.lock().unwrap();
+            assert_eq!(provider_id_of(&conn, "qualifying-on-sync"), "tx");
+        }
+
         Ok(())
     }
 }

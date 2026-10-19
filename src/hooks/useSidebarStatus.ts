@@ -5,6 +5,7 @@ import * as authApi from "@/lib/api/auth";
 import type { ManagedAuthProvider } from "@/lib/api/auth";
 import { useProxyStatusQuery } from "@/lib/query/proxy";
 import { proxyApi } from "@/lib/api/proxy";
+import { useDshRelayStatus } from "@/lib/query/dsh";
 import { useUsageSummary } from "@/lib/query/usage";
 import { MODE_APP_IDS, isModeAppId } from "@/config/appConfig";
 import { parseFiniteNumber } from "@/components/usage/format";
@@ -48,12 +49,24 @@ export function useSidebarStatus() {
     })),
   });
 
+  // DSH 不是模式应用：它的「路由」是中转链路是否接着，跟 Claude Code 的模式标签同义
+  const { data: dshRelay } = useDshRelayStatus();
+  const dshAttached = dshRelay?.attached === true;
+
   const serviceRunning = proxyStatus?.running ?? false;
   const modes = MODE_APP_IDS.map((_, index) => modeQueries[index]?.data?.mode);
   const modeKey = modes.join(",");
 
   const appStatus = useMemo(() => {
     return (app: AppId): AppNavStatus => {
+      if (app === "deepseek-harness") {
+        const mode: AppMode = dshAttached ? "route" : "direct";
+        return {
+          mode,
+          alert:
+            mode !== "direct" && proxyStatus !== undefined && !serviceRunning,
+        };
+      }
       if (!isModeAppId(app)) {
         return { mode: "direct", alert: false };
       }
@@ -66,7 +79,7 @@ export function useSidebarStatus() {
     };
     // modes 是每次渲染新建的数组，用 modeKey 判断变化
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [proxyStatus, serviceRunning, modeKey]);
+  }, [proxyStatus, serviceRunning, modeKey, dshAttached]);
 
   const todayCost = parseFiniteNumber(todaySummary?.totalCost) ?? 0;
   // 和用量页「真实消耗 Tokens」同口径

@@ -433,11 +433,17 @@ fn folded_app_type_sql(column: &str) -> String {
 /// `proxy_request_logs` 与 `usage_daily_rollups` 的 (provider_id, app_type)
 /// 形状相同，两者皆可作为 `log_alias`。providers 主键即 (id, app_type)，
 /// 连接至多 1:1，不会放大行数。
+///
+/// `app_type` 需要折叠：DeepSeek Harness 的用量行按入口写 `app_type='dsh'`，
+/// 但它的 provider 配置存在 `app_type='deepseek-harness'` 下，直接等值连接
+/// 永远匹配不到。这里只对 dsh 做映射，其他应用仍保持精确匹配——写成 CASE
+/// 而不是 `OR`，连接仍是等值语义，避免同一行匹配到多个 provider。
 fn providers_join(log_alias: &str, provider_alias: &str) -> String {
     format!(
         "LEFT JOIN providers {provider_alias} \
          ON {log_alias}.provider_id = {provider_alias}.id \
-         AND {log_alias}.app_type = {provider_alias}.app_type"
+         AND CASE WHEN {log_alias}.app_type = 'dsh' THEN 'deepseek-harness' \
+             ELSE {log_alias}.app_type END = {provider_alias}.app_type"
     )
 }
 
@@ -1776,6 +1782,8 @@ impl Database {
         // UNION detail logs + rollup data, then aggregate
         let detail_pname = provider_name_coalesce("l", "p");
         let rollup_pname = provider_name_coalesce("r", "p2");
+        let detail_join = providers_join("l", "p");
+        let rollup_join = providers_join("r", "p2");
         let real_total_detail = real_total_tokens_sql("l");
         let real_total_rollup = real_total_tokens_sql("r");
         let speed_ok = speed_eligible_sql("l");
@@ -1807,7 +1815,7 @@ impl Database {
                     COALESCE(SUM(CASE WHEN {est_ok} THEN l.output_tokens ELSE 0 END), 0) as est_output,
                     COALESCE(SUM(CASE WHEN {est_ok} THEN l.latency_ms ELSE 0 END), 0) as est_ms
                 FROM proxy_request_logs l
-                LEFT JOIN providers p ON l.provider_id = p.id AND l.app_type = p.app_type
+                {detail_join}
                 {detail_where}
                 GROUP BY l.provider_id, l.app_type
                 UNION ALL
@@ -1823,7 +1831,7 @@ impl Database {
                     0,
                     0
                 FROM usage_daily_rollups r
-                LEFT JOIN providers p2 ON r.provider_id = p2.id AND r.app_type = p2.app_type
+                {rollup_join}
                 {rollup_where}
                 GROUP BY r.provider_id, r.app_type
             )
@@ -1833,14 +1841,15 @@ impl Database {
 
         // 分组键用不会出现在 ID 里的 0x1F 拼接，和下面主查询的 (provider_id, app_type) 对上
         let (first_token_ms, est_first_token_ms) = {
+            let median_from =
+                format!("FROM proxy_request_logs l\n                     {detail_join}");
             let detail_refs: Vec<&dyn rusqlite::ToSql> =
                 detail_params.iter().map(|p| p.as_ref()).collect();
             let medians = |eligible_sql: String| {
                 first_token_medians(
                     &conn,
                     "l.provider_id || char(31) || l.app_type",
-                    "FROM proxy_request_logs l
-                     LEFT JOIN providers p ON l.provider_id = p.id AND l.app_type = p.app_type",
+                    &median_from,
                     &detail_where,
                     &eligible_sql,
                     &detail_refs,
@@ -2153,9 +2162,10 @@ impl Database {
         };
 
         // 获取总数
+        let logs_join = providers_join("l", "p");
         let count_sql = format!(
             "SELECT COUNT(*) FROM proxy_request_logs l
-             LEFT JOIN providers p ON l.provider_id = p.id AND l.app_type = p.app_type
+             {logs_join}
              {where_clause}"
         );
         let mut count_cache = lock_conn!(self.log_count_cache);
@@ -2194,7 +2204,7 @@ impl Database {
                     l.status_code, l.error_message, l.created_at, l.data_source, l.pricing_model,
                     l.input_token_semantics
              FROM proxy_request_logs l
-             LEFT JOIN providers p ON l.provider_id = p.id AND l.app_type = p.app_type
+             {logs_join}
              {where_clause}
              ORDER BY l.created_at DESC
              LIMIT ? OFFSET ?"
@@ -2229,6 +2239,7 @@ impl Database {
         let conn = lock_conn!(self.conn);
 
         let detail_pname = provider_name_coalesce("l", "p");
+        let detail_join = providers_join("l", "p");
         let detail_sql = format!(
             "SELECT l.request_id, l.provider_id, {detail_pname} as provider_name, l.app_type, l.model,
                     l.request_model, l.cost_multiplier,
@@ -2238,7 +2249,7 @@ impl Database {
                     l.status_code, l.error_message, l.created_at, l.data_source, l.pricing_model,
                     l.input_token_semantics
              FROM proxy_request_logs l
-             LEFT JOIN providers p ON l.provider_id = p.id AND l.app_type = p.app_type
+             {detail_join}
              WHERE l.request_id = ?"
         );
         let result = conn.query_row(&detail_sql, [request_id], row_to_request_log_detail);
@@ -5391,6 +5402,186 @@ mod tests {
         assert_eq!(stats.len(), 1);
         assert_eq!(stats[0].provider_id, "_opencode_session");
         assert_eq!(stats[0].provider_name, "OpenCode (Session)");
+
+        Ok(())
+    }
+
+    /// DSH 的用量行记 `app_type='dsh'`，provider 配置却存在
+    /// `app_type='deepseek-harness'` 下：读侧必须做这层映射才能显示真实名字，
+    /// 同时不能因为 providers 里同 id 还有别的 app_type 而把行数放大。
+    #[test]
+    fn test_dsh_session_rows_use_deepseek_harness_provider_name() -> Result<(), AppError> {
+        let db = Database::memory()?;
+
+        {
+            let conn = lock_conn!(db.conn);
+            for (id, app_type, name) in [
+                ("tx", "deepseek-harness", "TX Relay"),
+                ("tx", "claude", "Claude TX"),
+            ] {
+                conn.execute(
+                    "INSERT INTO providers (id, app_type, name, settings_config)
+                     VALUES (?1, ?2, ?3, '{}')",
+                    params![id, app_type, name],
+                )?;
+            }
+            insert_usage_log(
+                &conn,
+                "dsh-1",
+                "dsh",
+                "tx",
+                "dsh-model",
+                "dsh_session",
+                1000,
+                100,
+                50,
+                0,
+                0,
+                200,
+                "0.01",
+            )?;
+            insert_usage_log(
+                &conn,
+                "dsh-2",
+                "dsh",
+                "tx",
+                "dsh-model",
+                "dsh_session",
+                1001,
+                100,
+                50,
+                0,
+                0,
+                200,
+                "0.02",
+            )?;
+            // 没有注册 provider 的历史行仍走占位名。
+            insert_usage_log(
+                &conn,
+                "dsh-legacy",
+                "dsh",
+                "_dsh_session",
+                "dsh-model",
+                "dsh_session",
+                1002,
+                10,
+                5,
+                0,
+                0,
+                200,
+                "0",
+            )?;
+        }
+
+        let stats = db.get_provider_stats(None, None, Some("dsh"), None, None)?;
+        assert_eq!(
+            stats.iter().map(|s| s.request_count).sum::<u64>(),
+            3,
+            "providers join must stay 1:1 and not duplicate dsh rows"
+        );
+        let tx = stats
+            .iter()
+            .find(|s| s.provider_id == "tx")
+            .expect("tx group");
+        assert_eq!(tx.provider_name, "TX Relay");
+        assert_eq!(tx.request_count, 2);
+        let legacy = stats
+            .iter()
+            .find(|s| s.provider_id == "_dsh_session")
+            .expect("legacy group");
+        assert_eq!(legacy.provider_name, "DeepSeek Harness (Session)");
+
+        // Provider 名称筛选走同一个 providers_join，也要命中真实名字。
+        let filtered = db.get_provider_stats(None, None, Some("dsh"), Some("TX Relay"), None)?;
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].provider_id, "tx");
+        assert_eq!(filtered[0].request_count, 2);
+
+        let logs = db.get_request_logs(
+            &LogFilters {
+                app_type: Some("dsh".into()),
+                ..Default::default()
+            },
+            0,
+            10,
+        )?;
+        assert_eq!(logs.total, 3, "log count must not duplicate dsh rows");
+        assert_eq!(logs.data.len(), 3);
+        for log in logs.data.iter().filter(|l| l.provider_id == "tx") {
+            assert_eq!(log.provider_name.as_deref(), Some("TX Relay"));
+        }
+        assert!(logs.data.iter().any(|l| l.provider_id == "_dsh_session"
+            && l.provider_name.as_deref() == Some("DeepSeek Harness (Session)")));
+
+        let detail = db.get_request_detail("dsh-1")?.expect("detail row");
+        assert_eq!(detail.provider_name.as_deref(), Some("TX Relay"));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_dsh_session_rows_without_deepseek_harness_provider_keep_fallbacks(
+    ) -> Result<(), AppError> {
+        let db = Database::memory()?;
+
+        {
+            let conn = lock_conn!(db.conn);
+            insert_usage_log(
+                &conn,
+                "dsh-unregistered",
+                "dsh",
+                "tx",
+                "dsh-model",
+                "dsh_session",
+                1000,
+                10,
+                5,
+                0,
+                0,
+                200,
+                "0",
+            )?;
+            insert_usage_log(
+                &conn,
+                "dsh-placeholder",
+                "dsh",
+                "_dsh_session",
+                "dsh-model",
+                "dsh_session",
+                1001,
+                10,
+                5,
+                0,
+                0,
+                200,
+                "0",
+            )?;
+        }
+
+        let logs = db.get_request_logs(
+            &LogFilters {
+                app_type: Some("dsh".into()),
+                ..Default::default()
+            },
+            0,
+            10,
+        )?;
+        assert_eq!(logs.total, 2);
+        let unregistered = logs
+            .data
+            .iter()
+            .find(|l| l.request_id == "dsh-unregistered")
+            .expect("unregistered row");
+        assert_eq!(unregistered.provider_name.as_deref(), Some("tx"));
+        let placeholder = logs
+            .data
+            .iter()
+            .find(|l| l.request_id == "dsh-placeholder")
+            .expect("placeholder row");
+        assert_eq!(
+            placeholder.provider_name.as_deref(),
+            Some("DeepSeek Harness (Session)")
+        );
 
         Ok(())
     }

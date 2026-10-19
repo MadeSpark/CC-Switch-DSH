@@ -80,12 +80,12 @@ Windows 上通常展开为 `C:\Users\<用户>\.cc-switch\dsh_relay_state.json`�
 
 ## 退出行为表
 
-| 场景 | 中转设置状态 | 事件 | 结果 |
-| --- | --- | --- | --- |
-| 正常运行后退出 | `dshRelayEnabled=true`、`dshRestoreOnExit=true`、已附加 | 用户主动退出 CCS | 逐条恢复原始 `baseURL`，清空侧车文件；DSH 继续直连 |
-| 运行中异常终止 | 中转已附加，退出钩子未执行 | 崩溃或强杀 | 侧车保留 `attached=true`；下次启动按 `heal_on_startup` 自愈 |
-| 中转开关关闭 | `dshRelayEnabled=false`，但侧车仍 `attached=true` | CCS 启动 | 按侧车记录还原原始地址，再清理中转状态 |
-| 中转开关开启 | `dshRelayEnabled=true` | CCS 启动或运行期间 | 按当前端口自动接管；使用本机中转，退出时是否还原由 `dshRestoreOnExit` 决定 |
+| 场景           | 中转设置状态                                            | 事件               | 结果                                                                       |
+| -------------- | ------------------------------------------------------- | ------------------ | -------------------------------------------------------------------------- |
+| 正常运行后退出 | `dshRelayEnabled=true`、`dshRestoreOnExit=true`、已附加 | 用户主动退出 CCS   | 逐条恢复原始 `baseURL`，清空侧车文件；DSH 继续直连                         |
+| 运行中异常终止 | 中转已附加，退出钩子未执行                              | 崩溃或强杀         | 侧车保留 `attached=true`；下次启动按 `heal_on_startup` 自愈                |
+| 中转开关关闭   | `dshRelayEnabled=false`，但侧车仍 `attached=true`       | CCS 启动           | 按侧车记录还原原始地址，再清理中转状态                                     |
+| 中转开关开启   | `dshRelayEnabled=true`                                  | CCS 启动或运行期间 | 按当前端口自动接管；使用本机中转，退出时是否还原由 `dshRestoreOnExit` 决定 |
 
 “退出还原”只描述用户主动退出 CCS 时的地址恢复，不代表 DSH 进程退出，也不改变 DSH 自己的 provider、凭据或当前模型管理方式。
 
@@ -131,6 +131,24 @@ Windows 上通常展开为 `C:\Users\<用户>\.cc-switch\dsh_relay_state.json`�
 真换不回来时（例如某个进程把文件锁超过约 1.5 s），界面给「N 个 provider 的地址还没换回原始直连地址」的
 警告并保留台账，不做成功提示，下次启动或退出继续重试。
 
+## 视图状态与用量归属（`4.0.14-dsh.8`）
+
+「直連 / 路由」是**页内视图**，不是全局页签。它的唯一事实源是 `dsh_relay_status` 的 `attached`：
+从别的应用切回 DeepSeek Harness 时按当前接管状态渲染，不会退回「直連」再弹「你在查看「直連」，但
+目前是路由」这种自相矛盾的提示。用户点 pill 只在本次会话里覆盖视图（于是能看到另一侧的提示条和
+「開始路由 / 回到直連」按钮），一旦 `attached` 变化覆盖值立刻作废；旧版本存下的 `dshRelay` 页签会在
+启动时迁移成供应商页。侧栏的 DSH 行也改读同一份状态：接管中显示与 Claude Code 同款的 `路由` 标签
+（选中行按既有设计不显示标签）。
+
+中转是**字节级透传**，不解响应体，所以中转不会写用量行、也拿不到逐请求耗时：DSH 的用量仍然全部
+来自会话日志导入（`docs/DSH-TOKEN-USAGE.md`），用量页里这些行的「速度 / 首字」保持 `—`。`dsh.8` 修的
+是这些行的**供应商归属**：导入时优先落真实 `provider_id`（在 `providers` 表里按
+`app_type='deepseek-harness'` 核对存在性，否则回落 `_dsh_session`），同一次同步事务内用
+`provider_type` 幂等回填历史明细行；读侧的 providers 连接只对 `app_type='dsh'` 折叠成
+`deepseek-harness`（`CASE` 等值连接，不放大行数）。`providers` 里已删掉的供应商仍回落显示
+`DeepSeek Harness (Session)`；`usage_daily_rollups` 没有 `provider_type` 列，已经归档的历史日期无法
+反推真实供应商，口径见 token 文档。
+
 ## 实测结果（`4.0.14-dsh.3`）
 
 还原后的状态只在 CCS 不在运行时存在，所以用三段脚本在真实进程上验证（`ccswitch-dsh-exit-smoke.cjs`，全部通过）：
@@ -151,4 +169,3 @@ Windows 上通常展开为 `C:\Users\<用户>\.cc-switch\dsh_relay_state.json`�
 - 争用对照（`ccswitch-dsh-contention-smoke.cjs`，用 `FileShare.None` 独占锁住 patch 层 500 ms 后再切）：
   dsh.7 在 653 ms 后成功、0 条残留且与备份逐字节一致；同一把锁下 dsh.6 9 ms 就失败（`os error 32`）并把
   5 条 `/dsh/` 地址留在文件里——这就是用户报的那个回归。
-

@@ -127,6 +127,7 @@ import {
 import { invalidatePiProviderCaches, usePiCurrentState } from "@/lib/query/pi";
 import { dshApi } from "@/lib/api/dsh";
 import { invalidateDshProviderCaches, dshKeys } from "@/lib/query/dsh";
+import { useDshModeView } from "@/hooks/useDshModeView";
 import WorkspaceFilesPanel from "@/components/workspace/WorkspaceFilesPanel";
 import EnvPanel from "@/components/openclaw/EnvPanel";
 import ToolsPanel from "@/components/openclaw/ToolsPanel";
@@ -159,7 +160,13 @@ function App() {
 
   const [activeApp, setActiveApp] = useState<AppId>(getInitialApp);
   const sharedFeatureApp = sharedFeatureAppOf(activeApp);
-  const [currentView, setCurrentView] = useState<View>(readStoredView);
+  const [currentView, setCurrentView] = useState<View>(() => {
+    const stored = readStoredView();
+    // dsh.7 之前把 DSH 的「路由」看法存成了一整页，现在改成页内视图
+    return stored === "dshRelay" ? "providers" : stored;
+  });
+  // DSH 直連 / 路由的临时选择：只在本会话里覆盖，切去别的应用再回来不会丢
+  const { view: dshView, setView: setDshView } = useDshModeView();
   const [settingsSection, setSettingsSection] =
     useState<SettingsSection>("general");
   const [appConfigScrollTarget, setAppConfigScrollTarget] = useState<AppId>();
@@ -301,6 +308,9 @@ function App() {
 
   const { isRunning: isProxyRunning, takeoverStatus } = useProxyStatus();
   const modeAppId = isModeAppId(activeApp) ? activeApp : null;
+  // DSH 的「直連 / 路由」是页内视图，由中转是否接着决定；换应用再回来时不能退回直連，
+  // 所以不写进 currentView（那会被 selectApp / 应用页归属校验重置）。
+  const dshRouteView = activeApp === "deepseek-harness" && dshView === "route";
   // 换了应用、新面板还没报上来时为 undefined：表单按应用实际生效的模式
   const currentModeView =
     providerModeView?.app === activeApp ? providerModeView.view : undefined;
@@ -1158,9 +1168,7 @@ function App() {
     </DropdownMenu>
   );
 
-  const providerListView =
-    currentView === "providers" ||
-    (activeApp === "deepseek-harness" && currentView === "dshRelay");
+  const providerListView = currentView === "providers" || dshRouteView;
 
   const appPageName =
     currentView === "workspace"
@@ -1276,8 +1284,10 @@ function App() {
       return (
         <DshModeBar
           providers={Object.values(providers)}
-          view={currentView === "dshRelay" ? "dshRelay" : "providers"}
-          onViewChange={(view) => setCurrentView(view)}
+          view={dshView === "route" ? "dshRelay" : "providers"}
+          onViewChange={(view) =>
+            setDshView(view === "dshRelay" ? "route" : "direct")
+          }
         />
       );
     }
@@ -1339,15 +1349,11 @@ function App() {
       >
         <div className="space-y-4">
           {activeApp === "deepseek-harness" && (
-            <DshRelayNotice
-              view={currentView === "dshRelay" ? "route" : "direct"}
-            />
+            <DshRelayNotice view={dshView === "route" ? "route" : "direct"} />
           )}
           <ProviderList
             {...listCallbacks}
-            dshRelayView={
-              activeApp === "deepseek-harness" && currentView === "dshRelay"
-            }
+            dshRelayView={dshRouteView}
             providers={providers}
             currentProviderId={currentProviderId}
             appId={activeApp}

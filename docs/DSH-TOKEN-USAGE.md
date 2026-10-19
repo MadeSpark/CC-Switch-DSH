@@ -15,12 +15,12 @@
 
 导入的字段映射如下：
 
-| DSH 字段 | 统计字段 | 含义 |
-| --- | --- | --- |
-| `inputTokens` | `input_tokens` | 新产生的输入 token |
-| `outputTokens` | `output_tokens` | 输出 token |
-| `cacheReadTokens` | `cache_read_tokens` | 从缓存读取的 token |
-| `cacheWriteTokens` | `cache_creation_tokens` | 写入缓存的 token |
+| DSH 字段           | 统计字段                | 含义               |
+| ------------------ | ----------------------- | ------------------ |
+| `inputTokens`      | `input_tokens`          | 新产生的输入 token |
+| `outputTokens`     | `output_tokens`         | 输出 token         |
+| `cacheReadTokens`  | `cache_read_tokens`     | 从缓存读取的 token |
+| `cacheWriteTokens` | `cache_creation_tokens` | 写入缓存的 token   |
 
 `inputTokens` 按“新鲜输入 token”处理，缓存命中量单独计入 `cacheReadTokens`，`cacheWriteTokens` 记入 `cache_creation_tokens`。费用会使用 CC Switch 已有的模型价格表；没有价格匹配时仍保留 token 行，但费用为零或待定，具体显示取决于用量页面。
 
@@ -32,8 +32,17 @@
 
 - `app_type = "dsh"`
 - `data_source = "dsh_session"`
-- `provider_id = "_dsh_session"`
-- 显示名称：`DeepSeek Harness (Session)`
+- `provider_id`：`4.0.14-dsh.8` 起优先落**真实 provider key**（例如 `tx`、`yapi-gpt-default`），前提是
+  它存在于 `providers` 表中且 `app_type = "deepseek-harness"`；查不到时回落 `_dsh_session`
+- 占位行的显示名称：`DeepSeek Harness (Session)`
+
+明细行的 `provider_type` 从 `dsh.3` 起就保存了日志里的真实 provider 标识，`dsh.8` 因此可以在同步事务
+内做一次幂等回填：`provider_id = '_dsh_session'` 且 `provider_type` 能在 providers 表里查到的行，原地
+改成真实 id。读侧（`usage_stats.rs` 的 `providers_join`）只对 `app_type='dsh'` 把连接条件折叠成
+`deepseek-harness`，写成 `CASE` 等值连接而不是 `OR`，避免同一行被多个 supplier 放大。
+
+`usage_daily_rollups` 没有 `provider_type` 列，**已经归档/prune 掉的历史日期无法反推真实供应商**，这些
+行仍显示 `DeepSeek Harness (Session)`；本次修复只覆盖明细行与之后的导入。
 
 ## 去重与文件游标
 
@@ -48,7 +57,8 @@
 1. 打开 CC Switch 用量页，在“数据来源”抽屉中开启“自动同步”开关（字段 `sessionAutoSyncEnabled`）。该设置默认开启，界面显示“每 10 分钟”的同步节奏；CCS 启动时也会执行一次全量扫描。
 2. 确认 DSH 已在 `~/.dsh/sessions/` 下生成 `session.v4.jsonl.zstd`，并且当前用户对这些文件和父目录具有读取权限。
 3. 让 DSH 完成至少一条 assistant 回复，等待下一次自动同步，或使用现有的手动同步入口。
-4. 打开用量统计，查找 `DeepSeek Harness (Session)` 或数据来源 `dsh_session`，核对 model、输入、输出和缓存读取数量。
+4. 打开用量统计，核对 DSH 行的供应商是否显示成 DSH 里真实配置的供应商名（例如 `WorkBuddy`）；已删除
+   的供应商或查不到的历史行会显示 `DeepSeek Harness (Session)`，数据来源仍是 `dsh_session`。
 5. 再次同步同一批文件，记录数量和 token 总数应保持不变；向日志追加新 assistant 记录后再同步，新增记录应只增加一次。
 
 也可以用 `src-tauri/src/services/session_usage_dsh.rs` 中的同步测试夹具验证多 frame 文件、重复记录和追加记录。
@@ -69,3 +79,18 @@
 - 真实语料全量扫描（88 个 `session.v4.jsonl.zstd`、11,820 条记录、0 解析错误、12.355 s）：`request_count=11,820`、`SUM(input_tokens)=105,630,281`、`SUM(output_tokens)=16,100,843`、`SUM(cache_read_tokens)=866,750,547`、`SUM(cache_creation_tokens)=0`、`SUM(total_cost_usd)=192.565240616`、`suspected_duplicates=0`；抽查三条原始记录与入库行，均满足 `inputTokens + outputTokens + cacheReadTokens = totalTokens`。
 - 部署版 GUI 冒烟：用量页“数据来源”出现 `dsh_session`（`11,996` 次请求、`$192.769171`），应用筛选条的 DeepSeek Harness 图标可切换，汇总返回 `cacheReadTokens` 与 `cacheHitRate=0.8918`，切到 DSH 过滤后列表正常列出会话日志导入行。
 
+## 实测结果（`4.0.14-dsh.8`）
+
+- 单元测试 `cargo test session_usage_dsh`：8 passed / 1 ignored；新增覆盖真实 provider id 落库、provider
+  属于别的 app 时回落占位符、回填幂等且只作用于 `dsh_session` 行、空根目录不报错。`usage_stats` 新增
+  两例覆盖 `app_type='dsh'` 的供应商名解析与无匹配时的兜底。
+- 部署版 GUI（`ccswitch-dsh8-bugs.cjs`）触发一次真实同步：导入 21 条、跳过 96 条、扫描 174 个文件、
+  0 错误；`get_request_logs{appType:"dsh"}` 最近 20 行的供應商全部为 `WorkBuddy`（`providerId=tx`），
+  不再出现 `工作階段日誌`。
+- 用户报的 18:21:13–18:21:31 `deepseek-v4.1-flash` 行，数据库里 `provider_id` 已全部从 `_dsh_session`
+  回填成 `tx`；明细行分布 `tx` 12,429 / `yapi-gpt-default` 2,044 / `yapi-default-claude` 246 /
+  `spacetimeai` 5。
+- 未回填的 590 行 `provider_type` 分别是 `xiaobai`(325) / `xianyu`(210) / `deepseek-account`(55)，这些
+  provider 已不在 DSH 供应商表里，按设计保持 `DeepSeek Harness (Session)`。
+- 用量页請求日誌显示 `DSH / WorkBuddy / deepseek-v4.1-flash`；「速度 / 首字」仍为 `—`（中转字节透传，
+  不产生逐请求计时），「未定價」来自模型价格表缺该模型，均与本轮无关。
