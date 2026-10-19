@@ -4833,8 +4833,6 @@
     }
   },
   "dshRelay": {
-    "title": "DeepSeek Harness",
-    "sectionTitle": "DSH Aktarımı",
     "relayLabel": "DSH isteklerini CC Switch üzerinden aktar",
     "relayDescription": "Açıldığında DSH sağlayıcılarının API temel adresleri CC Switch'in yerel aktarım adresine yazılır; kapatıldığında özgün doğrudan adresler hemen geri yüklenir.",
     "relayHelp": "Aktarım adresi genellikle http://127.0.0.1:15721'dir. CC Switch kapandığında aktarım geçersiz olur; otomatik geri yükleme kapalıysa DSH bağlanamaz ve adresleri elle doğrudan bağlantıya çevirmeniz gerekir.",
@@ -4866,32 +4864,15 @@
   },
   "dshReasoning": {
     "label": "Akıl yürütme",
+    "notSet": "Ayarlanmadı",
     "chipWire": "Gönderilen: {{wire}}",
     "chipSilent": "Akıl yürütme parametresi gönderilmez",
+    "noParam": "Gönderilmez",
+    "keepOne": "En az bir düzey açık kalmalı",
     "applyPreset": "Önerilen ön ayar · {{family}}",
     "recommended": "{{family}} ön ayarı",
     "clear": "Akıl yürütme düzeylerini temizle",
     "forcedOff": "Akıl yürütme kapatıldı",
-    "adaptive": "Uyarlanabilir düşünme açık",
-    "level_off": "Kapalı",
-    "level_minimal": "En az",
-    "level_low": "Düşük",
-    "level_medium": "Orta",
-    "level_high": "Yüksek",
-    "level_xhigh": "Çok yüksek",
-    "level_max": "En yüksek"
-  },
-  "dshPreset": {
-    "save": "Ön ayar olarak kaydet",
-    "saveHint": "Bu katalogdaki her modeli (akıl yürütme düzeyleriyle) model ön ayarı olarak kaydeder; aynı ada sahip bir model eklediğinizde uygulanması önerilir.",
-    "savedNew": "{{count}} model ön ayarı kaydedildi",
-    "savedUpdated": "{{count}} model ön ayarı kaydedildi, {{updated}} tanesi güncellendi",
-    "noModels": "Henüz model kimliği yok — ön ayar kaydetmeden önce model ekleyin",
-    "saveFailed": "Model ön ayarları kaydedilemedi",
-    "saveDefaults": "Varsayılan olarak kaydet",
-    "saveDefaultsHint": "Yukarıdaki akıl yürütme düzeyini ve en fazla token sayısını varsayılan üretim seçenekleri olarak kaydeder",
-    "saveDefaultsHintShort": "Yeni eklenen modellere uygulanır",
-    "defaultsSaved": "Varsayılan üretim seçenekleri kaydedildi",
-    "defaultsEmpty": "Önce bir akıl yürütme düzeyi veya en fazla token sayısı ayarlayın"
+    "adaptive": "Uyarlanabilir düşünme açık"
   }
 }

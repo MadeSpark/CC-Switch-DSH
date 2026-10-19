@@ -19,7 +19,6 @@ import {
   formatEstimatedTokensPerSecond,
   formatFirstTokenSeconds,
   formatOutputTokensPerSecond,
-  formatTokensCompact,
   getLocaleFromLanguage,
   isSessionLogRequest,
   parseFiniteNumber,
@@ -27,6 +26,7 @@ import {
 import { usageTable } from "./usageTable";
 import { getUsageProviderLabel, usageProviderTitle } from "./providerLabel";
 import { useMoneyFormat } from "@/hooks/useMoneyFormat";
+import { useTokenFormat } from "@/hooks/useTokenFormat";
 import {
   REQUEST_LOG_COLUMN_LABEL_KEYS,
   resolveRequestLogColumns,
@@ -169,6 +169,7 @@ export function RequestLogTable({
 }: RequestLogTableProps) {
   const { t, i18n } = useTranslation();
   const { money, usdHint } = useMoneyFormat();
+  const { tokens } = useTokenFormat();
   const [page, setPage] = useState(0);
   const pageSize = 20;
 
@@ -372,12 +373,12 @@ export function RequestLogTable({
               : fmtInt(freshInput, locale)
           }
         >
-          {formatTokensCompact(freshInput, locale)}
+          {tokens(freshInput, locale)}
         </td>
       ),
       output: (
         <td className={usageTable.td} title={fmtInt(log.outputTokens, locale)}>
-          {formatTokensCompact(log.outputTokens, locale)}
+          {tokens(log.outputTokens, locale)}
         </td>
       ),
       cacheRead: (
@@ -388,7 +389,7 @@ export function RequestLogTable({
             write: fmtInt(log.cacheCreationTokens, locale),
           })}
         >
-          {hasCache ? formatTokensCompact(log.cacheReadTokens, locale) : "—"}
+          {hasCache ? tokens(log.cacheReadTokens, locale) : "—"}
         </td>
       ),
       cacheWrite: (
@@ -405,7 +406,7 @@ export function RequestLogTable({
           }
         >
           {!cacheWriteUnknown && log.cacheCreationTokens > 0
-            ? formatTokensCompact(log.cacheCreationTokens, locale)
+            ? tokens(log.cacheCreationTokens, locale)
             : "—"}
         </td>
       ),

@@ -335,35 +335,99 @@ export function formatEstimatedTokensPerSecond(
   return formatTokensPerSecond(getEstimatedTokensPerSecond(log));
 }
 
+/** Token 计数单位：国际缩写（1K · 1M · 1.61B）或中文数位（1千 · 100万 · 16.1亿）。 */
+export type TokenUnit = "intl" | "zh";
+
+export const TOKEN_UNITS: readonly TokenUnit[] = ["intl", "zh"];
+
+/** 设置里没存、或存了认不出来的值，都按国际缩写显示（老配置的行为）。 */
+export function resolveTokenUnit(
+  settings: UsageDisplaySettings | undefined,
+): TokenUnit {
+  return settings?.tokenUnit === "zh" ? "zh" : "intl";
+}
+
+interface TokenUnitEntry {
+  size: number;
+  suffix: string;
+}
+
+/** 国际缩写按 1000 进位；中文按数位：千 10^3、万 10^4、亿 10^8（没有「百」）。 */
+const INTL_TOKEN_UNITS: readonly TokenUnitEntry[] = [
+  { size: 1e9, suffix: "B" },
+  { size: 1e6, suffix: "M" },
+  { size: 1e3, suffix: "K" },
+];
+
+const ZH_TOKEN_UNITS: readonly TokenUnitEntry[] = [
+  { size: 1e8, suffix: "亿" },
+  { size: 1e4, suffix: "万" },
+  { size: 1e3, suffix: "千" },
+];
+
+const ZH_HANT_TOKEN_UNITS: readonly TokenUnitEntry[] = [
+  { size: 1e8, suffix: "億" },
+  { size: 1e4, suffix: "萬" },
+  { size: 1e3, suffix: "千" },
+];
+
+/** 最多 3 位有效数字：1K、1.23K、12.3K、123K，尾零自然去掉 */
+const TOKEN_UNIT_SIGNIFICANT_DIGITS = 3;
+
+function tokenUnits(unit: TokenUnit, lang: string): readonly TokenUnitEntry[] {
+  if (unit !== "zh") return INTL_TOKEN_UNITS;
+  return isTraditionalChineseLanguage(normalizeLanguageTag(lang))
+    ? ZH_HANT_TOKEN_UNITS
+    : ZH_TOKEN_UNITS;
+}
+
+function roundTokenSignificand(abs: number, size: number): number {
+  return Number((abs / size).toPrecision(TOKEN_UNIT_SIGNIFICANT_DIGITS));
+}
+
 /**
- * 表格和指标卡里的 Token 数：1 万以下写全（带千分位），以上压成最多 3 位有效数字
- * （48.2K、189K、18.2M），精确值放进 title。四种语言都用 K/M/B，和画板一致。
+ * 两种单位制共用同一条路：先挑够大的最大单位，压成最多 3 位有效数字；
+ * 四舍五入后撞到上一级（999.95K → 1M、9999 千 → 1 万）就改用上一级单位。
+ * 不到 1000 写整数，精确值和千分位由调用方放进 title。
  */
-export function formatTokensCompact(value: unknown, locale?: string): string {
+function formatTokenValue(
+  value: number,
+  unit: TokenUnit,
+  lang: string,
+  locale: string | undefined,
+): string {
+  const abs = Math.abs(value);
+  const sign = value < 0 ? "-" : "";
+  const units = tokenUnits(unit, lang);
+  if (abs < units[units.length - 1].size) {
+    return `${sign}${new Intl.NumberFormat(locale).format(Math.round(abs))}`;
+  }
+  for (let i = 0; i < units.length; i++) {
+    const { size, suffix } = units[i];
+    if (abs < size) continue;
+    const scaled = roundTokenSignificand(abs, size);
+    // 999.95K 进位成 1000K 时改用上一级单位
+    if (i > 0 && scaled * size >= units[i - 1].size) {
+      const bigger = units[i - 1];
+      return `${sign}${roundTokenSignificand(abs, bigger.size)}${bigger.suffix}`;
+    }
+    return `${sign}${scaled}${suffix}`;
+  }
+  return `${sign}${abs}`;
+}
+
+/**
+ * 表格和指标卡里的 Token 数：默认国际缩写（1K、1M、1.61B），
+ * 设置里选了中文单位就写（1千、100万、16.1亿），精确值放进 title。
+ */
+export function formatTokensCompact(
+  value: unknown,
+  locale?: string,
+  unit: TokenUnit = "intl",
+): string {
   const num = parseFiniteNumber(value);
   if (num == null) return "--";
-  const abs = Math.abs(num);
-  if (abs < 10_000) {
-    return new Intl.NumberFormat(locale).format(Math.round(num));
-  }
-  const units: Array<[number, string]> = [
-    [1e9, "B"],
-    [1e6, "M"],
-    [1e3, "K"],
-  ];
-  for (let i = 0; i < units.length; i++) {
-    const [size, suffix] = units[i];
-    if (abs >= size) {
-      const scaled = Number((num / size).toPrecision(3));
-      // 999.95K 进位成 1000K 时改用上一级单位
-      if (Math.abs(scaled) >= 1000 && i > 0) {
-        const [biggerSize, biggerSuffix] = units[i - 1];
-        return `${Number((num / biggerSize).toPrecision(3))}${biggerSuffix}`;
-      }
-      return `${scaled}${suffix}`;
-    }
-  }
-  return String(num);
+  return formatTokenValue(num, unit, locale ?? "", locale);
 }
 
 function normalizeLanguageTag(language: string): string {
@@ -417,34 +481,16 @@ export function joinClauses(items: readonly string[], lang: string): string {
 }
 
 /**
- * Token 数量的紧凑显示。
- *
- * Why: 中日文用户期待 "亿/万" 量纲；英文用户期待 K/M/B。共用同一份格式化
- * 逻辑避免 Hero 卡和分应用卡显示不一致。`compactDecimals=2` 用于 Hero
- * 大数副标（更精确），默认 1 位用于卡片副字段。
+ * 图表轴和悬停卡里的 Token / 请求数：和表格共用同一套单位表，只是不补零。
+ * 非法值和 0 都写「0」，省得小卡片上出现「--」。
  */
 export function formatTokensShort(
   value: number,
   lang: string,
-  compactDecimals: 1 | 2 = 1,
+  unit: TokenUnit = "intl",
 ): string {
-  if (!Number.isFinite(value) || value <= 0) return "0";
-  const decimals = compactDecimals;
-  const normalizedLang = normalizeLanguageTag(lang);
-  if (isTraditionalChineseLanguage(normalizedLang)) {
-    if (value >= 1e8) return `${(value / 1e8).toFixed(2)} 億`;
-    if (value >= 1e4) return `${(value / 1e4).toFixed(decimals)} 萬`;
-    return value.toLocaleString("zh-TW");
-  }
-  if (normalizedLang.startsWith("zh") || normalizedLang.startsWith("ja")) {
-    if (value >= 1e8) return `${(value / 1e8).toFixed(2)} 亿`;
-    if (value >= 1e4) return `${(value / 1e4).toFixed(decimals)} 万`;
-    return value.toLocaleString();
-  }
-  if (value >= 1e9) return `${(value / 1e9).toFixed(2)}B`;
-  if (value >= 1e6) return `${(value / 1e6).toFixed(2)}M`;
-  if (value >= 1e3) return `${(value / 1e3).toFixed(decimals)}K`;
-  return value.toLocaleString();
+  if (!Number.isFinite(value) || value === 0) return "0";
+  return formatTokenValue(value, unit, lang, getLocaleFromLanguage(lang));
 }
 
 /** 「刚刚」「N 分钟前」「N 小时前」「N 天前」 */

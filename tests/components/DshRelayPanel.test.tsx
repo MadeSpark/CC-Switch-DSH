@@ -1,4 +1,4 @@
-// DSH 中转设置页的行为测试：
+// DeepSeek Harness 应用页路由面板的行为测试：
 // 1) 后端状态读不到时降级成「状态不可用」，两个开关都锁住（不能盲切）
 // 2) 成功切换：调 dsh_set_relay 的 payload 正确、toast 提示、缓存被写回、开关翻面
 // 3) 切换失败：toast 报错，开关保持原状，缓存不被污染
@@ -12,7 +12,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { DshSection } from "@/components/settings/sections/DshSection";
+import { DshRelayPanel } from "@/components/providers/DshRelayPanel";
 import type { DshRelayStatus } from "@/lib/api/dsh";
 import { dshKeys } from "@/lib/query/dsh";
 
@@ -91,7 +91,7 @@ function renderSection() {
   });
   const view = render(
     <QueryClientProvider client={client}>
-      <DshSection />
+      <DshRelayPanel />
     </QueryClientProvider>,
   );
   return { client, ...view };
@@ -115,14 +115,11 @@ beforeEach(() => {
   toastError.mockReset();
 });
 
-describe("DshSection", () => {
+describe("DshRelayPanel", () => {
   it("状态读不到时显示不可用提示并锁住两个开关", async () => {
     invokeMock.mockRejectedValue(new Error("dsh_relay_status not ready"));
 
     renderSection();
-
-    // 页头下方那行应用名确实用了 dshRelay.title，不是留着的死键
-    expect(screen.getByText("dshRelay.title")).toBeInTheDocument();
 
     expect(
       await screen.findByText("dshRelay.statusUnavailableHint"),

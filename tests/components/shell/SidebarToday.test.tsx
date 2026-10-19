@@ -103,7 +103,8 @@ describe("sidebar Today label", () => {
     status.todayCost = 0;
     status.todayTokens = 5_000;
     renderSidebar({ usageDisplay: { sidebarTodayItems: ["cost", "tokens"] } });
-    expect(screen.getByText("5,000")).toBeInTheDocument();
+    // 千以下才写全数；5 千按国际缩写压成 5K
+    expect(screen.getByText("5K")).toBeInTheDocument();
     expect(screen.queryByText("$0.00")).not.toBeInTheDocument();
   });
 

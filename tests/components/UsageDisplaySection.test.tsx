@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { UsageDisplaySection } from "@/components/usage/UsageDisplaySection";
@@ -94,6 +94,58 @@ describe("UsageDisplaySection", () => {
     );
     await user.type(screen.getByRole("textbox"), "{Enter}");
     expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("switches token units and writes only the picked unit", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(<UsageDisplaySection value={undefined} onChange={onChange} />);
+
+    const trigger = screen.getByRole("combobox", {
+      name: "usage.display.tokenUnit",
+    });
+    // 没设置过＝国际缩写
+    expect(trigger).toHaveTextContent("usage.display.tokenUnitIntl");
+    expect(screen.getByText("usage.display.tokenUnitHint")).toBeInTheDocument();
+
+    await user.click(trigger);
+    await user.click(
+      await screen.findByRole("option", { name: "usage.display.tokenUnitZh" }),
+    );
+    expect(onChange).toHaveBeenCalledWith({ tokenUnit: "zh" });
+    expect(trigger).toHaveTextContent("usage.display.tokenUnitZh");
+
+    // 再切回来也只写这一个键
+    onChange.mockClear();
+    await user.click(trigger);
+    await user.click(
+      await screen.findByRole("option", {
+        name: "usage.display.tokenUnitIntl",
+      }),
+    );
+    expect(onChange).toHaveBeenCalledWith({ tokenUnit: "intl" });
+  });
+
+  it("falls back to the saved token unit when saving fails", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn().mockResolvedValue(false);
+    render(
+      <UsageDisplaySection
+        value={{ currency: "CNY", tokenUnit: "intl" }}
+        onChange={onChange}
+      />,
+    );
+
+    const trigger = screen.getByRole("combobox", {
+      name: "usage.display.tokenUnit",
+    });
+    await user.click(trigger);
+    await user.click(
+      await screen.findByRole("option", { name: "usage.display.tokenUnitZh" }),
+    );
+    await waitFor(() =>
+      expect(trigger).toHaveTextContent("usage.display.tokenUnitIntl"),
+    );
   });
 
   it("picks up to two items for the sidebar Today label", async () => {

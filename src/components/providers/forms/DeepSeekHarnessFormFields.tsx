@@ -1,11 +1,16 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { BookmarkPlus, Plus, Sparkles, Trash2, X } from "lucide-react";
+import { Check, ChevronDown, Plus, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { FormLabel } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { ImeSafeInput } from "@/components/ui/ime-safe-input";
 import { Button } from "@/components/ui/button";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import {
   Select,
@@ -22,15 +27,13 @@ import {
 } from "@/lib/api/model-fetch";
 import {
   DSH_MODEL_API_OPTIONS,
-  DSH_PRESET_EXTRAS_KEY,
   DSH_REASONING_LEVELS,
-  buildDshPresetExtras,
   dshReasoningEffortsEqual,
   dshReasoningPresetFor,
+  formatDshReasoningLevelsLabel,
   isDshReasoningEfforts,
   nextDshRowKey,
   orderDshReasoningEfforts,
-  pickDshPresetExtras,
   toggleDshReasoningLevel,
   withDshRowKeys,
   type DshModel,
@@ -40,16 +43,6 @@ import {
   FetchedModelPicker,
   type FetchedModelSelection,
 } from "./FetchedModelPicker";
-import { useCommittableRef, useLatestRef } from "@/hooks/useLatestRef";
-import { useModelPresetPrompt } from "@/hooks/useModelPresetPrompt";
-import { useModelPresets } from "@/hooks/useModelPresets";
-import {
-  hasPresetParams,
-  pickPresetParams,
-  uniquePresetId,
-  type ModelPreset,
-  type ModelPresetParams,
-} from "@/lib/modelPresets";
 import type { ProviderCategory } from "@/types";
 
 const API_FORMAT_LABELS: Record<string, string> = {
@@ -57,6 +50,138 @@ const API_FORMAT_LABELS: Record<string, string> = {
   "openai-responses": "OpenAI Responses",
   "anthropic-messages": "Anthropic Messages",
 };
+
+interface DshReasoningLevelsEditorProps {
+  /** 这一行已存的等级表；`undefined` 表示没设置过（不写这个字段）。 */
+  efforts?: DshReasoningEfforts;
+  /** 最后一个非 off 等级：不能再取消，点了只给提示。 */
+  blockedLevel?: string;
+  onToggle: (level: string) => void;
+}
+
+/**
+ * 推理等级控件：与 Codex 表单同一个 Popover 壳（紧凑触发器 + 折叠文案），
+ * 面板里是一列 checkbox —— 等级名用英文原文，右侧灰字是真正会落盘的发送值。
+ * 打开后不自动关闭，方便连续勾选；数据仍然由调用方的 onToggle 负责持久化。
+ */
+function DshReasoningLevelsEditor({
+  efforts,
+  blockedLevel,
+  onToggle,
+}: DshReasoningLevelsEditorProps) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+
+  // 已知等级在前（从弱到强），网关自定义的等级名原样接在后面。
+  const selected = efforts
+    ? [
+        ...DSH_REASONING_LEVELS.filter((level) => level in efforts),
+        ...Object.keys(efforts).filter(
+          (level) =>
+            !(DSH_REASONING_LEVELS as readonly string[]).includes(level),
+        ),
+      ]
+    : [];
+  const triggerLabel =
+    selected.length > 0
+      ? formatDshReasoningLevelsLabel(selected)
+      : t("dshReasoning.notSet", { defaultValue: "Not set" });
+
+  return (
+    <Popover modal={false} open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          aria-label={t("dshReasoning.label", { defaultValue: "Reasoning" })}
+          title={triggerLabel}
+          className={cn(
+            "flex h-7 items-center justify-between gap-1 whitespace-nowrap rounded-md border border-border-default bg-surface px-2 text-caption leading-none transition-colors hover:border-border-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring data-[state=open]:border-border-strong",
+            selected.length === 0 ? "text-fg-3" : "text-fg-1",
+          )}
+        >
+          <span className="min-w-16 truncate">{triggerLabel}</span>
+          <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-60" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        side="bottom"
+        align="start"
+        sideOffset={6}
+        avoidCollisions
+        collisionPadding={8}
+        className="z-[1000] w-72 p-1"
+      >
+        <div
+          role="group"
+          aria-label={t("dshReasoning.label", { defaultValue: "Reasoning" })}
+        >
+          {DSH_REASONING_LEVELS.map((level) => {
+            const active = !!efforts && level in efforts;
+            // 落盘的值可能是 null（不发任何思考参数）或自定义字面值。
+            const wire = active ? (efforts?.[level] ?? null) : null;
+            const blocked = blockedLevel === level;
+            return (
+              <button
+                key={level}
+                type="button"
+                role="checkbox"
+                aria-checked={active}
+                aria-disabled={blocked ? true : undefined}
+                data-level={level}
+                title={
+                  active
+                    ? wire === null
+                      ? t("dshReasoning.chipSilent", {
+                          defaultValue: "No reasoning parameter is sent",
+                        })
+                      : t("dshReasoning.chipWire", {
+                          defaultValue: "Sends: {{wire}}",
+                          wire,
+                        })
+                    : undefined
+                }
+                onClick={() => {
+                  if (blocked) return;
+                  onToggle(level);
+                }}
+                className={cn(
+                  "flex w-full items-center gap-2 rounded-control px-2 py-1 text-left text-caption focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  active ? "text-fg-1" : "text-fg-2",
+                  blocked ? "cursor-not-allowed opacity-60" : "hover:bg-subtle",
+                )}
+              >
+                <Check
+                  className={cn(
+                    "h-3.5 w-3.5 shrink-0",
+                    active ? "text-action-text opacity-100" : "opacity-0",
+                  )}
+                />
+                <span className="flex-1">{level}</span>
+                <span
+                  aria-hidden="true"
+                  className="max-w-32 truncate text-fg-3"
+                >
+                  {active
+                    ? wire === null
+                      ? t("dshReasoning.noParam", { defaultValue: "Not sent" })
+                      : wire
+                    : "—"}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+        {blockedLevel && (
+          <p className="px-2 pt-1 pb-0.5 text-caption text-fg-3">
+            {t("dshReasoning.keepOne", {
+              defaultValue: "At least one level must stay enabled",
+            })}
+          </p>
+        )}
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 interface DeepSeekHarnessFormFieldsProps {
   isOfficial: boolean;
@@ -129,276 +254,10 @@ export function DeepSeekHarnessFormFields({
 }: DeepSeekHarnessFormFieldsProps) {
   const { t } = useTranslation();
 
-  // 模型预设（需求 5）：新增或提交模型 id 之后询问是否套用预设参数。
-  // DSH 的上下文窗口是行级字段，思考等级 / 最大 tokens 是 provider 级字段，
-  // 所以套用时一个写到命中的模型行，另外两个写到表单上方的生成参数里。
-  const { offerPresetForModel, dialog: presetPromptDialog } =
-    useModelPresetPrompt();
-  const {
-    presets,
-    generic: genericPresetParams,
-    save,
-    isLoading: presetsLoading,
-    isSaving,
-  } = useModelPresets();
-  const hasGenericPresetParams = hasPresetParams(genericPresetParams);
-  const [modelsRef, commitModels] = useCommittableRef(models, onModelsChange);
-  const reasoningEffortChangeRef = useLatestRef(onReasoningEffortChange);
-  const maxTokensChangeRef = useLatestRef(onMaxTokensChange);
-  const defaultModelRef = useLatestRef(defaultModel);
-  /** 同一行同一个模型 id 只询问一次；用户改了 id 可以再问。 */
-  const offeredPresetRef = useRef(new Map<string, string>());
-
-  const applyPresetParams = useCallback(
-    (
-      target: { rowKey?: string; modelId: string },
-      params: ModelPresetParams,
-    ) => {
-      const picked = pickPresetParams(params);
-      const rows = modelsRef.current;
-      let index = target.rowKey
-        ? rows.findIndex((row) => row.rowKey === target.rowKey)
-        : -1;
-      if (index < 0 && target.modelId.trim()) {
-        const wanted = target.modelId.trim();
-        index = rows.findIndex((row) => row.id.trim() === wanted);
-      }
-
-      // 行可能已经被删掉了，此时只落 provider 级参数，不新建行。
-      // DSH 自己的行级参数（每行的 reasoningEfforts / input / compat）存在
-      // 预设的 extraParams.dsh 里，套用时还原到命中的模型行上。
-      const extras = pickDshPresetExtras(picked.extraParams);
-      const rowPatch: Partial<DshModel> = {};
-      if (picked.contextWindow !== undefined) {
-        rowPatch.contextWindow = picked.contextWindow;
-      }
-      if (extras.reasoningEfforts !== undefined) {
-        rowPatch.reasoningEfforts = extras.reasoningEfforts;
-      }
-      if (extras.input !== undefined) {
-        rowPatch.input = extras.input;
-      }
-      if (
-        index >= 0 &&
-        (Object.keys(rowPatch).length > 0 || extras.compat !== undefined)
-      ) {
-        const compat = extras.compat;
-        commitModels(
-          rows.map((row, rowIndex) => {
-            if (rowIndex !== index) return row;
-            const nextRow: DshModel = { ...row, ...rowPatch };
-            if (compat) nextRow.compat = { ...(row.compat ?? {}), ...compat };
-            return nextRow;
-          }),
-        );
-      }
-      if (picked.reasoningEffort !== undefined) {
-        reasoningEffortChangeRef.current(picked.reasoningEffort);
-      }
-      if (picked.maxOutputTokens !== undefined) {
-        maxTokensChangeRef.current(String(picked.maxOutputTokens));
-      }
-
-      // DSH 表单没有 temperature 的位置；extraParams 里除 dsh 命名空间以外的
-      // 键也落不下去：列出来告诉用户哪些被跳过。
-      const ignored: string[] = [];
-      if (picked.temperature !== undefined) {
-        ignored.push(t("modelPresets.paramLabels.temperature"));
-      }
-      if (
-        picked.extraParams !== undefined &&
-        Object.keys(picked.extraParams).some(
-          (key) => key !== DSH_PRESET_EXTRAS_KEY,
-        )
-      ) {
-        ignored.push(t("modelPresets.paramLabels.extraParams"));
-      }
-      if (ignored.length > 0) {
-        toast.warning(
-          t("modelPresets.prompt.skipped", { params: ignored.join(", ") }),
-        );
-      } else {
-        toast.success(t("modelPresets.prompt.updated"));
-      }
-    },
-    [commitModels, maxTokensChangeRef, modelsRef, reasoningEffortChangeRef, t],
-  );
-
-  const offerPresetForRow = useCallback(
-    (target: { rowKey?: string; modelId: string }) => {
-      const modelId = target.modelId.trim();
-      if (!modelId) return;
-      const dedupeKey = target.rowKey ?? modelId;
-      if (offeredPresetRef.current.get(dedupeKey) === modelId) return;
-      const offered = offerPresetForModel(modelId, (params) =>
-        applyPresetParams(target, params),
-      );
-      if (offered) offeredPresetRef.current.set(dedupeKey, modelId);
-    },
-    [applyPresetParams, offerPresetForModel],
-  );
-
-  /** 模型 id 输入框失焦 / 回车时触发询问（读到最新的行数据）。 */
-  const commitModelId = useCallback(
-    (rowKey: string | undefined, fallbackIndex: number) => {
-      const rows = modelsRef.current;
-      const row = rowKey
-        ? rows.find((item) => item.rowKey === rowKey)
-        : rows[fallbackIndex];
-      if (!row?.id.trim()) return;
-      offerPresetForRow({ rowKey: row.rowKey, modelId: row.id });
-    },
-    [modelsRef, offerPresetForRow],
-  );
-
-  /** 「使用通用参数」按钮：套到默认模型行（没有就第一行）。 */
-  const handleApplyGenericPreset = useCallback(() => {
-    const rows = modelsRef.current;
-    if (rows.length === 0) return;
-    const trimmedDefault = defaultModelRef.current.trim();
-    const target =
-      (trimmedDefault &&
-        rows.find((row) => row.id.trim() === trimmedDefault)) ||
-      rows[0];
-    applyPresetParams(
-      { rowKey: target.rowKey, modelId: target.id },
-      pickPresetParams(genericPresetParams),
-    );
-  }, [applyPresetParams, defaultModelRef, genericPresetParams, modelsRef]);
-
   const [fetchedModels, setFetchedModels] = useState<FetchedModel[]>([]);
   const [isFetchingModels, setIsFetchingModels] = useState(false);
 
-  /**
-   * Provider 级的生成参数（思考等级 / 最大 Tokens）：保存成模型预设时每行都
-   * 会带上，这样「刚调好的整套参数」可以整包复原。
-   */
-  const buildProviderPresetParams = useCallback((): ModelPresetParams => {
-    const params: ModelPresetParams = {};
-    const effort = reasoningEffort.trim();
-    if (effort) params.reasoningEffort = effort;
-    const tokens = maxTokens.trim() === "" ? NaN : Number(maxTokens.trim());
-    if (Number.isFinite(tokens) && tokens > 0) {
-      params.maxOutputTokens = Math.trunc(tokens);
-    }
-    return params;
-  }, [maxTokens, reasoningEffort]);
-
-  /**
-   * 一键把当前模型目录保存为模型预设（需求 6）：每个填了模型 id 的行存成一条
-   * 预设，模式是这个 id 本身，于是「拉取模型列表 → 逐个调参数 → 一键保存」之后，
-   * 以后再添加同名模型就会命中预设并询问是否套用。同名（不分大小写）已存在时
-   * 保留原来的 id / 名称，只更新参数。
-   */
-  const handleSaveAsPresets = useCallback(async () => {
-    // 预设还没加载完时不能保存：否则会拿空列表覆盖掉磁盘上已有的预设。
-    if (presetsLoading) return;
-    const rows = modelsRef.current.filter((row) => row.id.trim() !== "");
-    if (rows.length === 0) {
-      toast.info(t("dshPreset.noModels"));
-      return;
-    }
-
-    const providerParams = buildProviderPresetParams();
-    const next: ModelPreset[] = [...presets];
-    let created = 0;
-    let updated = 0;
-
-    for (const row of rows) {
-      const modelId = row.id.trim();
-      const params: ModelPresetParams = { ...providerParams };
-      if (row.contextWindow !== undefined) {
-        params.contextWindow = row.contextWindow;
-      }
-      const extras = buildDshPresetExtras({ ...row, id: modelId });
-      if (extras) {
-        params.extraParams = { [DSH_PRESET_EXTRAS_KEY]: extras };
-      }
-
-      const existingIndex = next.findIndex(
-        (preset) =>
-          preset.modelId.trim().toLowerCase() === modelId.toLowerCase(),
-      );
-      if (existingIndex >= 0) {
-        const existing = next[existingIndex];
-        // 合并而不是整条覆盖：DSH 表单装不下的字段（temperature、旧的
-        // contextWindow、其它 app 的 extraParams 命名空间）要留在预设里。
-        // `dsh` 命名空间以当前这一行为准（没填就删掉，避免残留旧等级）。
-        const extraParams: Record<string, unknown> = {
-          ...(existing.extraParams ?? {}),
-        };
-        delete extraParams[DSH_PRESET_EXTRAS_KEY];
-        if (params.extraParams) Object.assign(extraParams, params.extraParams);
-        next[existingIndex] = {
-          ...existing,
-          ...params,
-          id: existing.id,
-          name: existing.name || modelId,
-          modelId: existing.modelId,
-        };
-        if (Object.keys(extraParams).length > 0) {
-          next[existingIndex].extraParams = extraParams;
-        } else {
-          delete next[existingIndex].extraParams;
-        }
-        updated += 1;
-      } else {
-        next.push({
-          id: uniquePresetId(),
-          name: row.name?.trim() || modelId,
-          modelId,
-          ...params,
-        });
-        created += 1;
-      }
-    }
-
-    try {
-      await save({ presets: next, generic: genericPresetParams });
-      toast.success(
-        updated > 0
-          ? t("dshPreset.savedUpdated", { count: created + updated, updated })
-          : t("dshPreset.savedNew", { count: created }),
-      );
-    } catch (error) {
-      console.warn("[DSH] Failed to save model presets:", error);
-      toast.error(t("dshPreset.saveFailed"));
-    }
-  }, [
-    buildProviderPresetParams,
-    genericPresetParams,
-    modelsRef,
-    presets,
-    presetsLoading,
-    save,
-    t,
-  ]);
-
-  /** 把生成参数区里的思考等级 / 最大 Tokens 存成通用参数（合并，不清空别的字段）。 */
-  const handleSaveAsDefaults = useCallback(async () => {
-    if (presetsLoading) return;
-    const params = buildProviderPresetParams();
-    if (Object.keys(params).length === 0) {
-      toast.info(t("dshPreset.defaultsEmpty"));
-      return;
-    }
-    try {
-      await save({ presets, generic: { ...genericPresetParams, ...params } });
-      toast.success(t("dshPreset.defaultsSaved"));
-    } catch (error) {
-      console.warn("[DSH] Failed to save generic preset params:", error);
-      toast.error(t("dshPreset.saveFailed"));
-    }
-  }, [
-    buildProviderPresetParams,
-    genericPresetParams,
-    presets,
-    presetsLoading,
-    save,
-    t,
-  ]);
-
-  /** 点等级小胶囊：加/减一个等级；全减完就删掉整个字段（回到「未设置」）。 */
+  /** 点等级行：加/减一个等级；全减完就删掉整个字段（回到「未设置」）。 */
   const handleToggleReasoningLevel = (index: number, level: string) => {
     const model = models[index];
     if (!model) return;
@@ -502,7 +361,6 @@ export function DeepSeekHarnessFormFields({
       const removeSet = new Set(remove.map((id) => id.trim()));
       const next = models.filter((model) => !removeSet.has(model.id.trim()));
       const seen = new Set(next.map((model) => model.id.trim()));
-      const added: DshModel[] = [];
       for (const id of add) {
         const trimmed = id.trim();
         if (!trimmed || seen.has(trimmed)) continue;
@@ -517,27 +375,15 @@ export function DeepSeekHarnessFormFields({
           rowKey: nextDshRowKey(),
         };
         next.push(row);
-        added.push(row);
         seen.add(trimmed);
       }
       const withKeys = withDshRowKeys(next);
       onModelsChange(withKeys);
-      // 批量勾选时逐个弹询问框太吵，只在恰好新增一个模型时问一次。
-      if (added.length === 1) {
-        offerPresetForRow({ rowKey: added[0].rowKey, modelId: added[0].id });
-      }
       if (removeSet.has(defaultModel.trim())) {
         onDefaultModelChange(withKeys[0]?.id ?? "");
       }
     },
-    [
-      defaultModel,
-      fetchedModels,
-      models,
-      offerPresetForRow,
-      onDefaultModelChange,
-      onModelsChange,
-    ],
+    [defaultModel, fetchedModels, models, onDefaultModelChange, onModelsChange],
   );
 
   return (
@@ -593,32 +439,6 @@ export function DeepSeekHarnessFormFields({
             {t("deepseekHarness.maxTokensHint")}
           </p>
         </div>
-      </div>
-
-      {/* 把上面两个生成参数存成通用参数（合并进已有的通用参数，不动别的字段） */}
-      <div className="flex flex-wrap items-center gap-2">
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={handleSaveAsDefaults}
-          disabled={isSaving || presetsLoading}
-          title={t("dshPreset.saveDefaultsHint", {
-            defaultValue:
-              "Store the reasoning effort and max tokens above as default generator options.",
-          })}
-          className="h-7 gap-1"
-        >
-          <Sparkles className="h-3.5 w-3.5" />
-          {t("dshPreset.saveDefaults", {
-            defaultValue: "Save as defaults",
-          })}
-        </Button>
-        <span className="text-xs text-muted-foreground">
-          {t("dshPreset.saveDefaultsHintShort", {
-            defaultValue: "Applies to newly added models.",
-          })}
-        </span>
       </div>
 
       {/* API Key */}
@@ -739,35 +559,6 @@ export function DeepSeekHarnessFormFields({
               <Plus className="h-3.5 w-3.5" />
               {t("deepseekHarness.addModel", { defaultValue: "Add" })}
             </Button>
-            {/* 一键把当前目录（含每行推理等级）存成模型预设，下次加同名模型自动询问 */}
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={handleSaveAsPresets}
-              disabled={isSaving || presetsLoading || models.length === 0}
-              title={t("dshPreset.saveHint", {
-                defaultValue:
-                  "Save every model in this catalog (with its reasoning levels) as a model preset.",
-              })}
-              className="h-7 gap-1"
-            >
-              <BookmarkPlus className="h-3.5 w-3.5" />
-              {t("dshPreset.save", { defaultValue: "Save as preset" })}
-            </Button>
-            {hasGenericPresetParams && models.length > 0 && (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={handleApplyGenericPreset}
-                title={t("modelPresets.genericHint")}
-                className="h-7 gap-1"
-              >
-                <Sparkles className="h-3.5 w-3.5" />
-                {t("modelPresets.prompt.applyGeneric")}
-              </Button>
-            )}
           </div>
         </div>
 
@@ -809,11 +600,13 @@ export function DeepSeekHarnessFormFields({
                 dshReasoningEffortsEqual(efforts, recommended.efforts);
               const isAdaptive = model.compat?.forceAdaptiveThinking === true;
               // 只剩最后一个非 off 等级时不允许取消（与插件面板一致）。
-              const nonOff = efforts
+              const nonOffLevels = efforts
                 ? DSH_REASONING_LEVELS.filter(
                     (level) => level !== "off" && level in efforts,
-                  ).length
-                : 0;
+                  )
+                : [];
+              const blockedLevel =
+                nonOffLevels.length === 1 ? nonOffLevels[0] : undefined;
 
               return (
                 <div
@@ -827,12 +620,6 @@ export function DeepSeekHarnessFormFields({
                         onValueChange={(value) =>
                           updateModel(index, { id: value })
                         }
-                        onBlur={() => commitModelId(model.rowKey, index)}
-                        onKeyDown={(event) => {
-                          if (event.key !== "Enter") return;
-                          event.preventDefault();
-                          commitModelId(model.rowKey, index);
-                        }}
                         placeholder={t("deepseekHarness.modelId", {
                           defaultValue: "Model ID",
                         })}
@@ -843,10 +630,6 @@ export function DeepSeekHarnessFormFields({
                           models={fetchedModels}
                           onSelect={(id) => {
                             updateModel(index, { id });
-                            offerPresetForRow({
-                              rowKey: model.rowKey,
-                              modelId: id,
-                            });
                           }}
                         />
                       )}
@@ -899,55 +682,18 @@ export function DeepSeekHarnessFormFields({
                     </Button>
                   </div>
 
-                  {/* 推理等级（reasoningEfforts）：点亮的等级会写进模型配置 */}
+                  {/* 推理等级：与 Codex 表单同款控件，勾中的等级会写进模型配置 */}
                   <div className="flex flex-wrap items-center gap-1.5 pl-1">
                     <span className="text-caption text-muted-foreground">
                       {t("dshReasoning.label", { defaultValue: "Reasoning" })}
                     </span>
-                    {DSH_REASONING_LEVELS.map((level) => {
-                      const active = !!efforts && level in efforts;
-                      // 已点亮的等级：标题显示真正落盘的值（可能是 null、none 或
-                      // 自定义字面值），不是推荐表里的值；未点亮的不带标题。
-                      const stored = active ? (efforts?.[level] ?? null) : null;
-                      // 最后一个非 off 等级点不掉，否则会留下空表 / 触发误清空。
-                      const removeBlocked =
-                        active && level !== "off" && nonOff === 1;
-                      return (
-                        <button
-                          key={level}
-                          type="button"
-                          aria-pressed={active}
-                          disabled={removeBlocked}
-                          title={
-                            active
-                              ? stored === null
-                                ? t("dshReasoning.chipSilent", {
-                                    defaultValue:
-                                      "No reasoning parameter is sent for this level.",
-                                  })
-                                : t("dshReasoning.chipWire", {
-                                    defaultValue: "Sends: {{wire}}",
-                                    wire: stored,
-                                  })
-                              : undefined
-                          }
-                          onClick={() =>
-                            handleToggleReasoningLevel(index, level)
-                          }
-                          className={cn(
-                            "h-6 rounded-full border px-2 text-caption leading-none transition-colors",
-                            active
-                              ? "border-border-strong bg-subtle font-medium text-fg-1"
-                              : "border-border-default text-fg-3 hover:text-fg-1",
-                            removeBlocked && "cursor-not-allowed opacity-70",
-                          )}
-                        >
-                          {t(`dshReasoning.level_${level}`, {
-                            defaultValue: level,
-                          })}
-                        </button>
-                      );
-                    })}
+                    <DshReasoningLevelsEditor
+                      efforts={efforts}
+                      blockedLevel={blockedLevel}
+                      onToggle={(level) =>
+                        handleToggleReasoningLevel(index, level)
+                      }
+                    />
                     {isForcedOff && (
                       <span className="text-caption text-muted-foreground">
                         {t("dshReasoning.forcedOff", {
@@ -1027,7 +773,6 @@ export function DeepSeekHarnessFormFields({
           </p>
         </div>
       </div>
-      {presetPromptDialog}
     </>
   );
 }

@@ -13,9 +13,10 @@ See [DSH Native Architecture](docs/architecture/dsh-native.md) for ownership bou
 ## DeepSeek Harness 集成（个人分支新增）
 
 - **DSH token 消耗统计**：导入 `~/.dsh/sessions/**/session.v4.jsonl.zstd` 中的会话用量，写入统一用量统计，并按文件游标与记录 ID 去重。详见 [DSH token 统计](docs/DSH-TOKEN-USAGE.md)。
-- **DSH 中转与退出还原**：可将 provider 的 `baseURL` 指向 CC Switch 本机 `/dsh/<providerId>/` 路由，并在用户主动退出 CCS 时恢复原始 API 地址。详见 [DSH 中转](docs/DSH-RELAY.md)。
-- **模型预设**：可从 DSH 模型目录一键保存模型预设，也可把当前生成参数保存为通用参数并复用。详见 [DSH 模型预设](docs/DSH-MODEL-PRESETS.md)。
-- **模型级推理等级**：每个模型支持七档 reasoning effort，可使用模型族推荐预设、逐档调整或清除，并写入 DSH 模型配置。操作说明见 [DSH 模型预设](docs/DSH-MODEL-PRESETS.md)。
+- **DSH 中转与退出还原**：在 DeepSeek Harness 应用页的「路由」页签开启后，可将 provider 的 `baseURL` 指向 CC Switch 本机 `/dsh/<providerId>/` 路由，并在用户主动退出 CCS 时恢复原始 API 地址。详见 [DSH 中转](docs/DSH-RELAY.md)。
+- **模型字段就地编辑**：DSH 的模型参数（模型 ID、显示名称、上下文窗口、推理等级）都在模型行里原地编辑，对齐 OpenCode 的纯内联字段；全局「设置 → 模型预设」页面与 Codex / Claude Code 的预设功能仍在。详见 [DSH 模型字段与推理等级](docs/DSH-MODEL-PRESETS.md)。
+- **模型级推理等级**：点开推理等级下拉，多选英文档位（`off/minimal/low/medium/high/xhigh/max`），右侧灰字显示实际发送值；也可套用模型族推荐预设或一键清除。操作说明见 [DSH 模型字段与推理等级](docs/DSH-MODEL-PRESETS.md)。
+- **Token 计数单位可切换**：用量页「顯示」里可选计数单位——国际缩写（`1K` / `1M` / `1.61B`）或中文单位（`1千` / `100万` / `16.1亿`）。选择存在 `settings.json` 的 `usageDisplay.tokenUnit`，指标卡、统计表、请求日志、图表轴、侧栏「今日」与会话详情一起跟随，悬停仍显示精确整数。
 
 Focused verification:
 

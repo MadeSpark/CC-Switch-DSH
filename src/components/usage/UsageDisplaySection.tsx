@@ -24,10 +24,13 @@ import {
   isValidExchangeRate,
   resolveMoneyDisplay,
   resolveSidebarToday,
+  resolveTokenUnit,
   type DisplayCurrency,
   SIDEBAR_TODAY_ITEMS,
   SIDEBAR_TODAY_MAX_ITEMS,
   type SidebarTodayItem,
+  TOKEN_UNITS,
+  type TokenUnit,
 } from "./format";
 import {
   REQUEST_LOG_COLUMN_LABEL_KEYS,
@@ -225,6 +228,18 @@ export function UsageDisplaySection({
     }
   };
 
+  // Token 单位：同样先按刚选的显示，保存失败再退回去
+  const savedTokenUnit = resolveTokenUnit(value);
+  const [tokenUnit, setTokenUnit] = useState<TokenUnit>(savedTokenUnit);
+  useEffect(() => setTokenUnit(savedTokenUnit), [savedTokenUnit]);
+
+  const changeTokenUnit = async (next: TokenUnit) => {
+    setTokenUnit(next);
+    if ((await save({ tokenUnit: next })) === false) {
+      setTokenUnit(savedTokenUnit);
+    }
+  };
+
   const commitRate = () => {
     if (currency === "USD") return;
     const parsed = Number(rateDraft.trim());
@@ -313,6 +328,39 @@ export function UsageDisplaySection({
           )}
           <div className="flex items-center gap-2">
             <span className="text-body text-fg-2">
+              {t("usage.display.tokenUnit")}
+            </span>
+            <Select
+              value={tokenUnit}
+              onValueChange={(next) => {
+                // Radix Select 偶尔回报空串，忽略
+                const picked = TOKEN_UNITS.find((unit) => unit === next);
+                if (picked && picked !== tokenUnit) {
+                  void changeTokenUnit(picked);
+                }
+              }}
+            >
+              <SelectTrigger
+                className="h-7 w-56 text-body"
+                aria-label={t("usage.display.tokenUnit")}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {TOKEN_UNITS.map((unit) => (
+                  <SelectItem key={unit} value={unit}>
+                    {t(
+                      unit === "zh"
+                        ? "usage.display.tokenUnitZh"
+                        : "usage.display.tokenUnitIntl",
+                    )}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-body text-fg-2">
               {t("usage.display.sidebarToday")}
             </span>
             <ChecklistMenu
@@ -372,6 +420,9 @@ export function UsageDisplaySection({
             />
           </div>
         </div>
+        <p className="m-0 mt-1.5 text-caption text-fg-3">
+          {t("usage.display.tokenUnitHint")}
+        </p>
         {currency !== "USD" && (
           <p
             className={

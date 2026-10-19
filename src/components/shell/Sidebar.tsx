@@ -21,7 +21,6 @@ import {
   Server,
   Settings,
   SlidersHorizontal,
-  Waypoints,
 } from "lucide-react";
 import type { AppId } from "@/lib/api";
 import type { VisibleApps } from "@/types";
@@ -32,10 +31,10 @@ import { SkillsIcon } from "@/components/BrandIcons";
 import { sidebarWidth, useSidebarCollapsed } from "@/hooks/useSidebarCollapsed";
 import { useMoneyFormat } from "@/hooks/useMoneyFormat";
 import { useSettingsQuery } from "@/lib/query";
+import { useTokenFormat } from "@/hooks/useTokenFormat";
 import {
   fmtInt,
   formatHitRatePercent,
-  formatTokensCompact,
   getLocaleFromLanguage,
   getResolvedLang,
   resolveSidebarToday,
@@ -219,6 +218,7 @@ function MainDirectory({
 }: DirectoryProps) {
   const { t, i18n } = useTranslation();
   const { moneyShort } = useMoneyFormat();
+  const { tokens: formatTokens } = useTokenFormat();
   const { data: settings } = useSettingsQuery();
   const {
     appStatus,
@@ -240,9 +240,7 @@ function MainDirectory({
       case "cost":
         return todayCost > 0 ? moneyShort(todayCost) : null;
       case "tokens":
-        return todayTokens > 0
-          ? formatTokensCompact(todayTokens, locale)
-          : null;
+        return todayTokens > 0 ? formatTokens(todayTokens, locale) : null;
       case "requests":
         return todayRequests > 0
           ? t("nav.todayRequests", { value: fmtInt(todayRequests, locale) })
@@ -679,17 +677,11 @@ function NavItem({
 
 // ─── 设置目录 ──────────────────────────────────────────────────────────────
 
-const SETTINGS_ITEMS: {
-  section: SettingsSection;
-  icon: IconComponent;
-  /** 少数分区的标题不在 settings.sections 下（DSH 用独立的 dshRelay 命名空间） */
-  labelKey?: string;
-}[] = [
+const SETTINGS_ITEMS: { section: SettingsSection; icon: IconComponent }[] = [
   { section: "general", icon: SlidersHorizontal },
   { section: "appConfig", icon: Folder },
   { section: "modelPresets", icon: ListChecks },
   { section: "routing", icon: Route },
-  { section: "dsh", icon: Waypoints, labelKey: "dshRelay.sectionTitle" },
   { section: "network", icon: Globe },
   { section: "data", icon: Database },
   { section: "about", icon: Info },
@@ -738,13 +730,13 @@ function SettingsDirectory({
         aria-label={t("nav.settings")}
         className={cn("flex min-h-0 flex-1 flex-col", collapsed && "mt-2")}
       >
-        {SETTINGS_ITEMS.map(({ section, icon, labelKey }) => (
+        {SETTINGS_ITEMS.map(({ section, icon }) => (
           <NavItem
             key={section}
             collapsed={collapsed}
             selected={settingsSection === section}
             icon={icon}
-            label={t(labelKey ?? `settings.sections.${section}`)}
+            label={t(`settings.sections.${section}`)}
             onClick={() => onSelectSettingsSection(section)}
           />
         ))}

@@ -95,6 +95,7 @@ import {
 import { UsagePage } from "@/components/usage/UsagePage";
 import { EnvWarningBanner } from "@/components/env/EnvWarningBanner";
 import { SwitchModePanel } from "@/components/providers/mode/SwitchModePanel";
+import { DshRelayPanel } from "@/components/providers/DshRelayPanel";
 import { proxyApi } from "@/lib/api/proxy";
 import type { AppMode, StartupAttachFailure } from "@/types/proxy";
 import UsageScriptModal from "@/components/UsageScriptModal";
@@ -1206,7 +1207,9 @@ function App() {
       icon={<AppGlyph app={activeApp} size={20} badgeClassName="bg-app" />}
       title={APP_DISPLAY_NAME[activeApp]}
       subtitle={
-        activeApp === "openclaw" || activeApp === "hermes"
+        activeApp === "openclaw" ||
+        activeApp === "hermes" ||
+        activeApp === "deepseek-harness"
           ? undefined
           : appPageName
       }
@@ -1294,6 +1297,23 @@ function App() {
             items={[
               { value: "providers", label: t("appPage.providers") },
               { value: "hermesMemory", label: t("appPage.memory") },
+            ]}
+          />
+        </div>
+      );
+    }
+    // DeepSeek Harness 跟 Claude Code 一样：直连（原生供应商）/ 路由（CC Switch 中转）
+    if (activeApp === "deepseek-harness") {
+      return (
+        <div className="shrink-0 px-6 pt-2">
+          <PageTabs
+            aria-label={APP_DISPLAY_NAME["deepseek-harness"]}
+            idPrefix="dsh-page"
+            value={currentView}
+            onValueChange={(view) => setCurrentView(view)}
+            items={[
+              { value: "providers", label: t("dshRelay.direct") },
+              { value: "dshRelay", label: t("settings.tabProxy") },
             ]}
           />
         </div>
@@ -1447,6 +1467,17 @@ function App() {
               className="min-h-0 flex-1 overflow-y-auto scroll-stable"
             >
               <HermesMemoryPanel onOpenWebUI={openHermesWebUI} />
+            </div>
+          );
+        case "dshRelay":
+          return (
+            <div
+              id="main-content"
+              className="min-h-0 flex-1 overflow-y-auto scroll-stable"
+            >
+              <div className="px-6 pb-10 pt-4">
+                <DshRelayPanel />
+              </div>
             </div>
           );
         default:

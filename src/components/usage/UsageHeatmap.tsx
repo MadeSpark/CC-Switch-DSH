@@ -6,14 +6,11 @@ import { SegmentedControl } from "@/components/ui/segmented-control";
 import { useUsageFirstDate, useUsageTrends } from "@/lib/query/usage";
 import { cn } from "@/lib/utils";
 import type { UsageRangeSelection } from "@/types/usage";
-import {
-  formatTokensShort,
-  getLocaleFromLanguage,
-  parseFiniteNumber,
-} from "./format";
+import { getLocaleFromLanguage, parseFiniteNumber } from "./format";
 import type { UsageTrendStatLike } from "./UsageTrendChart";
 import { UsageTooltipCard } from "./UsageTooltipCard";
 import { useMoneyFormat } from "@/hooks/useMoneyFormat";
+import { useTokenFormat } from "@/hooks/useTokenFormat";
 import { USAGE_CHOICE_KEYS, useRememberedChoice } from "./rememberedChoice";
 
 const WEEKS = 53;
@@ -234,6 +231,7 @@ export function UsageHeatmap({
 }: UsageHeatmapProps) {
   const { t, i18n } = useTranslation();
   const { money } = useMoneyFormat();
+  const { tokensShort } = useTokenFormat();
   const [metric, setMetric] = useRememberedChoice<HeatMetric>(
     USAGE_CHOICE_KEYS.heatmapMetric,
     HEAT_METRICS,
@@ -348,8 +346,8 @@ export function UsageHeatmap({
               </h3>
               <span className="text-caption tabular-nums text-fg-3">
                 {t("usage.heatmap.spanSummary", {
-                  tokens: formatTokensShort(span.totals.tokens, language),
-                  requests: formatTokensShort(span.totals.requests, language),
+                  tokens: tokensShort(span.totals.tokens, language),
+                  requests: tokensShort(span.totals.requests, language),
                   cost: money(span.totals.cost, 2),
                 })}
               </span>

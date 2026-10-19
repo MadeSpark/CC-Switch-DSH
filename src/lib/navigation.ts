@@ -3,7 +3,8 @@ import type { AppId } from "@/lib/api";
 /**
  * 主窗口的导航模型（v7）：侧栏选一个应用或一个全局页；设置单独占一屏。
  *
- * - 应用页：点侧栏应用行进入供应商页；OpenClaw、Hermes 在页头下用分段控件切到自己的专属页。
+ * - 应用页：点侧栏应用行进入供应商页；OpenClaw、Hermes、DeepSeek Harness 在页头下用页签切到自己的专属页
+ *   （DSH 的专属页是「路由」：直连 / 路由两个页签，中转开关就放在路由页签里）。
  * - 全局页：用量统计、授权中心、MCP、Skills、提示词、会话、应用（安装与显示），每样只出现一次。
  * - 设置：侧栏换成设置目录，6 个分组。
  */
@@ -12,7 +13,8 @@ export type AppPage =
   | "providers"
   | "workspace"
   | "openclawConfig"
-  | "hermesMemory";
+  | "hermesMemory"
+  | "dshRelay";
 
 export type GlobalPage =
   | "usage"
@@ -31,7 +33,6 @@ export type SettingsSection =
   | "appConfig"
   | "modelPresets"
   | "routing"
-  | "dsh"
   | "network"
   | "data"
   | "about";
@@ -41,7 +42,6 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   "appConfig",
   "modelPresets",
   "routing",
-  "dsh",
   "network",
   "data",
   "about",
@@ -52,6 +52,7 @@ const APP_PAGES: AppPage[] = [
   "workspace",
   "openclawConfig",
   "hermesMemory",
+  "dshRelay",
 ];
 
 const GLOBAL_PAGES: GlobalPage[] = [
@@ -102,6 +103,8 @@ export function appPageBelongsTo(page: AppPage, app: AppId): boolean {
       return app === "openclaw";
     case "hermesMemory":
       return app === "hermes";
+    case "dshRelay":
+      return app === "deepseek-harness";
   }
 }
 
@@ -130,13 +133,15 @@ export function normalizeSettingsSection(
   switch (tab) {
     case "proxy":
     case "routing":
+    // 旧版「DSH 中转」设置分组已经并进 DeepSeek Harness 应用页的「路由」页签，
+    // 存过这个分组的旧会话落到最接近的「本地路由」上。
+    case "dsh":
       return "routing";
     case "advanced":
     case "data":
       return "data";
     case "appConfig":
     case "modelPresets":
-    case "dsh":
     case "network":
     case "about":
     case "general":

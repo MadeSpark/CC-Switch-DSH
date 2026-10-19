@@ -390,6 +390,10 @@ pub struct UsageDisplaySettings {
     /// 以后新加的列也按它自己的默认值出现
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub request_log_columns: BTreeMap<String, bool>,
+    /// Token 计数单位："intl"（1K / 1M / 1.61B，缺省）或 "zh"（1千 / 100万 / 16.1亿）；
+    /// 认不出的值前端按 intl 兜底
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token_unit: Option<String>,
 }
 
 /// 参数模板，可应用到新模型或作为通用默认值。

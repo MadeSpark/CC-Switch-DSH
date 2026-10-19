@@ -14,10 +14,17 @@ import {
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { useUsageTrends } from "@/lib/query/usage";
 import { Loader2 } from "lucide-react";
-import { fmtInt, getLocaleFromLanguage, parseFiniteNumber } from "./format";
+import {
+  fmtInt,
+  formatTokensShort,
+  getLocaleFromLanguage,
+  parseFiniteNumber,
+  type TokenUnit,
+} from "./format";
 import { resolveUsageRange } from "@/lib/usageRange";
 import type { UsageRangeSelection } from "@/types/usage";
 import { useMoneyFormat } from "@/hooks/useMoneyFormat";
+import { useTokenFormat } from "@/hooks/useTokenFormat";
 import { USAGE_CHOICE_KEYS, useRememberedChoice } from "./rememberedChoice";
 
 interface UsageTrendChartProps {
@@ -145,24 +152,16 @@ export function formatUsageTrendTickLabel(
   return point?.label ?? xKey;
 }
 
-export function createUsageTrendTokenTickFormatter(
-  locale: string,
-): Intl.NumberFormat {
-  return new Intl.NumberFormat(locale, {
-    notation: "compact",
-    compactDisplay: "short",
-    maximumFractionDigits: 1,
-  });
-}
-
+/** Y 轴 Token/请求数刻度：和用量页其他数字共用一套单位表（国际缩写 / 中文数位）。 */
 export function formatUsageTrendTokenTickLabel(
   value: unknown,
-  formatter: Intl.NumberFormat,
+  unit: TokenUnit,
+  lang: string,
 ): string {
   const num = parseFiniteNumber(value);
   if (num == null) return "--";
 
-  return formatter.format(num);
+  return formatTokensShort(num, lang, unit);
 }
 
 const TREND_METRICS = ["requests", "tokens", "cost"] as const;
@@ -182,6 +181,7 @@ export function UsageTrendChart({
 }: UsageTrendChartProps) {
   const { t, i18n } = useTranslation();
   const { money, moneyTick, rate } = useMoneyFormat();
+  const { tokenUnit } = useTokenFormat();
   const [metric, setMetric] = useRememberedChoice<TrendMetric>(
     USAGE_CHOICE_KEYS.trendMetric,
     TREND_METRICS,
@@ -205,10 +205,6 @@ export function UsageTrendChart({
   const isHourly = durationSeconds <= 24 * 60 * 60;
   const language = i18n.resolvedLanguage || i18n.language || "en";
   const dateLocale = getLocaleFromLanguage(language);
-  const tokenTickFormatter = useMemo(
-    () => createUsageTrendTokenTickFormatter(dateLocale),
-    [dateLocale],
-  );
 
   const chartData = useMemo(
     () =>
@@ -234,7 +230,7 @@ export function UsageTrendChart({
   const formatYTick = (value: unknown) =>
     metric === "cost"
       ? moneyTick(value)
-      : formatUsageTrendTokenTickLabel(value, tokenTickFormatter);
+      : formatUsageTrendTokenTickLabel(value, tokenUnit, language);
 
   const Chart = chartType === "bar" ? BarChart : AreaChart;
   // 成本先换算成显示币种再画，Y 轴才会按这个币种挑整齐的刻度。

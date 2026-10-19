@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   buildUsageTrendChartData,
-  createUsageTrendTokenTickFormatter,
   formatUsageTrendTokenTickLabel,
   formatUsageTrendTickLabel,
 } from "@/components/usage/UsageTrendChart";
@@ -119,37 +118,33 @@ describe("formatUsageTrendTickLabel", () => {
 });
 
 describe("formatUsageTrendTokenTickLabel", () => {
-  it("uses localized compact units for large token axis ticks", () => {
-    const zhFormatter = createUsageTrendTokenTickFormatter("zh-CN");
-    const zhTwFormatter = createUsageTrendTokenTickFormatter("zh-TW");
-    const enFormatter = createUsageTrendTokenTickFormatter("en-US");
-
-    expect(formatUsageTrendTokenTickLabel(600_000_000, zhFormatter)).toBe(
+  it("follows the chosen token unit for large token axis ticks", () => {
+    expect(formatUsageTrendTokenTickLabel(600_000_000, "zh", "zh-CN")).toBe(
       "6亿",
     );
-    expect(formatUsageTrendTokenTickLabel(1_950_000_000, zhFormatter)).toBe(
+    expect(formatUsageTrendTokenTickLabel(1_950_000_000, "zh", "zh-CN")).toBe(
       "19.5亿",
     );
-    expect(formatUsageTrendTokenTickLabel(65_000_000, zhTwFormatter)).toBe(
+    expect(formatUsageTrendTokenTickLabel(65_000_000, "zh", "zh-TW")).toBe(
       "6500萬",
     );
-    expect(formatUsageTrendTokenTickLabel(600_000_000, enFormatter)).toBe(
+    expect(formatUsageTrendTokenTickLabel(600_000_000, "intl", "en-US")).toBe(
       "600M",
     );
   });
 
+  it("keeps the international unit even when the UI is Chinese", () => {
+    expect(formatUsageTrendTokenTickLabel(600_000_000, "intl", "zh-CN")).toBe(
+      "600M",
+    );
+    expect(formatUsageTrendTokenTickLabel(65_000_000, "intl", "zh-TW")).toBe(
+      "65M",
+    );
+  });
+
   it("keeps zero and small-thousand token ticks readable", () => {
-    expect(
-      formatUsageTrendTokenTickLabel(
-        0,
-        createUsageTrendTokenTickFormatter("zh-CN"),
-      ),
-    ).toBe("0");
-    expect(
-      formatUsageTrendTokenTickLabel(
-        1500,
-        createUsageTrendTokenTickFormatter("en-US"),
-      ),
-    ).toBe("1.5K");
+    expect(formatUsageTrendTokenTickLabel(0, "zh", "zh-CN")).toBe("0");
+    expect(formatUsageTrendTokenTickLabel(1500, "intl", "en-US")).toBe("1.5K");
+    expect(formatUsageTrendTokenTickLabel(null, "intl", "en-US")).toBe("--");
   });
 });

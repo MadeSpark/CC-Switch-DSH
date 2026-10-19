@@ -2423,6 +2423,10 @@
     "display": {
       "title": "表示",
       "currency": "通貨",
+      "tokenUnit": "Token の単位",
+      "tokenUnitIntl": "国際表記",
+      "tokenUnitZh": "中国語の単位",
+      "tokenUnitHint": "表示のみ：1K · 1M · 1.61B または 1千 · 100万 · 16.1億。",
       "rate": "為替レート",
       "rateHint": "手動で入力し、表示の換算にのみ使います。費用は引き続き米ドルで記録されます。",
       "rateInvalid": "0 より大きい数値を入力してください",
@@ -4951,8 +4955,6 @@
     }
   },
   "dshRelay": {
-    "title": "DeepSeek Harness",
-    "sectionTitle": "DSH リレー",
     "relayLabel": "DSH のリクエストを CC Switch 経由で中継する",
     "relayDescription": "有効にすると、DSH の各プロバイダーの API ベース URL が CC Switch のローカル中継 URL に書き換えられます。無効にすると元の直接 URL にすぐ戻ります。",
     "relayHelp": "中継 URL は通常 http://127.0.0.1:15721 です。CC Switch を終了すると中継は無効になり、自動復元が切っていると DSH は接続できなくなります。手動で直接 URL に戻す必要があります。",
@@ -4984,32 +4986,15 @@
   },
   "dshReasoning": {
     "label": "推論レベル",
+    "notSet": "未設定",
     "chipWire": "送信値：{{wire}}",
     "chipSilent": "思考パラメータを送信しません",
+    "noParam": "送信しません",
+    "keepOne": "少なくとも 1 つのレベルを残してください",
     "applyPreset": "推奨プリセット · {{family}}",
     "recommended": "{{family}} プリセット",
     "clear": "推論レベルをクリア",
     "forcedOff": "思考は無効化されています",
-    "adaptive": "適応思考オン",
-    "level_off": "オフ",
-    "level_minimal": "最小",
-    "level_low": "低",
-    "level_medium": "中",
-    "level_high": "高",
-    "level_xhigh": "極高",
-    "level_max": "最大"
-  },
-  "dshPreset": {
-    "save": "プリセットとして保存",
-    "saveHint": "このカタログの各モデル（推論レベルを含む）をモデルプリセットとして保存します。同名モデルを追加すると適用するか確認します。",
-    "savedNew": "{{count}} 件のモデルプリセットを保存しました",
-    "savedUpdated": "{{count}} 件を保存しました（{{updated}} 件を更新）",
-    "noModels": "モデル ID がありません。モデルを追加してから保存してください",
-    "saveFailed": "モデルプリセットの保存に失敗しました",
-    "saveDefaults": "既定値として保存",
-    "saveDefaultsHint": "上の推論レベルと最大トークンを既定の生成オプションとして保存します",
-    "saveDefaultsHintShort": "追加したモデルに適用されます",
-    "defaultsSaved": "既定の生成オプションを保存しました",
-    "defaultsEmpty": "推論レベルまたは最大トークンを先に設定してください"
+    "adaptive": "適応思考オン"
   }
 }

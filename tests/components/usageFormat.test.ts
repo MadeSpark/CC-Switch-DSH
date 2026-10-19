@@ -15,6 +15,7 @@ import {
   formatTokensShort,
   resolveMoneyDisplay,
   resolveSidebarToday,
+  resolveTokenUnit,
   getAggregateTokensPerSecond,
   getEstimatedTokensPerSecond,
   getOutputTokensPerSecond,
@@ -25,8 +26,8 @@ import {
 
 describe("usage format helpers", () => {
   it("formats Traditional Chinese token units with Traditional characters", () => {
-    expect(formatTokensShort(12_345, "zh-TW")).toBe("1.2 萬");
-    expect(formatTokensShort(123_456_789, "zh-Hant", 2)).toBe("1.23 億");
+    expect(formatTokensShort(12_345, "zh-TW", "zh")).toBe("1.23萬");
+    expect(formatTokensShort(123_456_789, "zh-Hant", "zh")).toBe("1.23億");
   });
 
   it("resolves Traditional Chinese locale aliases", () => {
@@ -229,13 +230,95 @@ describe("usage format helpers", () => {
   });
 
   it("formats compact token counts with K/M/B and three significant digits", () => {
-    expect(formatTokensCompact(9_999, "en-US")).toBe("9,999");
+    expect(formatTokensCompact(9_999, "en-US")).toBe("10K");
     expect(formatTokensCompact(48_210, "en-US")).toBe("48.2K");
     expect(formatTokensCompact(189_400, "en-US")).toBe("189K");
     expect(formatTokensCompact(999_960, "en-US")).toBe("1M");
     expect(formatTokensCompact(18_200_000, "en-US")).toBe("18.2M");
     expect(formatTokensCompact(2_340_000_000, "en-US")).toBe("2.34B");
     expect(formatTokensCompact("x")).toBe("--");
+  });
+});
+
+describe("token units", () => {
+  it("formats international abbreviations with three significant digits", () => {
+    const cases: Array<[number, string]> = [
+      [0, "0"],
+      [42, "42"],
+      [999, "999"],
+      [1_000, "1K"],
+      [1_234, "1.23K"],
+      [9_999, "10K"],
+      [10_000, "10K"],
+      [999_960, "1M"],
+      [1_000_000, "1M"],
+      [18_200_000, "18.2M"],
+      [1_610_000_000, "1.61B"],
+      [-1_234_000, "-1.23M"],
+    ];
+    for (const [value, expected] of cases) {
+      expect(formatTokensCompact(value, "en-US", "intl")).toBe(expected);
+    }
+  });
+
+  it("uses Chinese numerals (千 / 万 / 亿) for the zh unit", () => {
+    const cases: Array<[number, string]> = [
+      [0, "0"],
+      [999, "999"],
+      [1_000, "1千"],
+      [1_234, "1.23千"],
+      // 9999 千 撞到上一级，改用 万
+      [9_999, "1万"],
+      [10_000, "1万"],
+      [12_345, "1.23万"],
+      [100_000, "10万"],
+      [1_000_000, "100万"],
+      // 9999 万 撞到上一级，改用 亿
+      [99_999_999, "1亿"],
+      [100_000_000, "1亿"],
+      [1_610_000_000, "16.1亿"],
+      [1_000_000_000_000, "10000亿"],
+      [-1_234_000, "-123万"],
+    ];
+    for (const [value, expected] of cases) {
+      expect(formatTokensCompact(value, "zh-CN", "zh")).toBe(expected);
+    }
+  });
+
+  it("keeps Traditional characters for Chinese units", () => {
+    expect(formatTokensCompact(12_345, "zh-TW", "zh")).toBe("1.23萬");
+    expect(formatTokensCompact(1_610_000_000, "zh-Hant", "zh")).toBe("16.1億");
+    // 国际缩写不随界面语言变
+    expect(formatTokensCompact(1_610_000_000, "zh-TW", "intl")).toBe("1.61B");
+  });
+
+  it("keeps thousand separators under 1000 and leaves unknown values blank", () => {
+    expect(formatTokensCompact(999, "en-US", "intl")).toBe("999");
+    expect(formatTokensCompact(999, "zh-CN", "zh")).toBe("999");
+    for (const unit of ["intl", "zh"] as const) {
+      expect(formatTokensCompact(null, "en-US", unit)).toBe("--");
+      expect(formatTokensCompact(undefined, "zh-CN", unit)).toBe("--");
+      expect(formatTokensCompact("x", "en-US", unit)).toBe("--");
+    }
+  });
+
+  it("short formatter takes the same unit as the third argument", () => {
+    expect(formatTokensShort(1_500_000, "en-US", "intl")).toBe("1.5M");
+    expect(formatTokensShort(1_500_000, "zh-CN", "zh")).toBe("150万");
+    expect(formatTokensShort(0, "zh-CN", "zh")).toBe("0");
+    expect(formatTokensShort(-12_345, "en-US", "intl")).toBe("-12.3K");
+  });
+
+  it("resolves the saved unit, defaulting to international abbreviations", () => {
+    expect(resolveTokenUnit(undefined)).toBe("intl");
+    expect(resolveTokenUnit({})).toBe("intl");
+    expect(resolveTokenUnit({ currency: "CNY" })).toBe("intl");
+    expect(resolveTokenUnit({ tokenUnit: "zh" })).toBe("zh");
+    expect(resolveTokenUnit({ tokenUnit: "intl" })).toBe("intl");
+    // 认不出来的值按老行为显示
+    expect(resolveTokenUnit({ tokenUnit: "wan" as unknown as "zh" })).toBe(
+      "intl",
+    );
   });
 });
 

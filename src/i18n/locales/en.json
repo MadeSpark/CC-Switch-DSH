@@ -2423,6 +2423,10 @@
     "display": {
       "title": "Display",
       "currency": "Currency",
+      "tokenUnit": "Token units",
+      "tokenUnitIntl": "International abbreviations",
+      "tokenUnitZh": "Chinese numerals",
+      "tokenUnitHint": "Display only: 1K · 1M · 1.61B or 1千 · 100万 · 16.1亿.",
       "rate": "Exchange rate",
       "rateHint": "Entered by hand and used only for display; costs are still recorded in USD.",
       "rateInvalid": "Enter a number greater than 0",
@@ -4951,8 +4955,6 @@
     }
   },
   "dshRelay": {
-    "title": "DeepSeek Harness",
-    "sectionTitle": "DSH Relay",
     "relayLabel": "Route DSH requests through CC Switch",
     "relayDescription": "When enabled, each DSH provider's API base URL is rewritten to CC Switch's local relay; disabling it restores the original direct URLs right away.",
     "relayHelp": "The relay is usually http://127.0.0.1:15721. It disappears once CC Switch quits: with auto-restore off, DSH can no longer connect until you switch the URLs back manually.",
@@ -4984,32 +4986,15 @@
   },
   "dshReasoning": {
     "label": "Reasoning",
+    "notSet": "Not set",
     "chipWire": "Sends: {{wire}}",
     "chipSilent": "No reasoning parameter is sent",
+    "noParam": "Not sent",
+    "keepOne": "At least one level must stay enabled",
     "applyPreset": "Use {{family}} preset",
     "recommended": "{{family}} preset",
     "clear": "Clear reasoning levels",
     "forcedOff": "Reasoning disabled",
-    "adaptive": "Adaptive thinking on",
-    "level_off": "Off",
-    "level_minimal": "Minimal",
-    "level_low": "Low",
-    "level_medium": "Medium",
-    "level_high": "High",
-    "level_xhigh": "XHigh",
-    "level_max": "Max"
-  },
-  "dshPreset": {
-    "save": "Save as preset",
-    "saveHint": "Save every model in this catalog (with its reasoning levels) as a model preset; adding a matching model later offers it.",
-    "savedNew": "Saved {{count}} model preset(s)",
-    "savedUpdated": "Saved {{count}} model preset(s), {{updated}} updated",
-    "noModels": "No model IDs yet — add a model before saving presets",
-    "saveFailed": "Failed to save model presets",
-    "saveDefaults": "Save as defaults",
-    "saveDefaultsHint": "Store the reasoning effort and max tokens above as default generator options",
-    "saveDefaultsHintShort": "Applies to newly added models",
-    "defaultsSaved": "Default generator options saved",
-    "defaultsEmpty": "Set a reasoning effort or max tokens first"
+    "adaptive": "Adaptive thinking on"
   }
 }

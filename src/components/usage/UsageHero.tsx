@@ -8,7 +8,6 @@ import { cn } from "@/lib/utils";
 import {
   fmtInt,
   formatHitRatePercent,
-  formatTokensCompact,
   getLocaleFromLanguage,
   getResolvedLang,
   parseFiniteNumber,
@@ -20,6 +19,7 @@ import {
   type UsageSummaryByApp,
 } from "@/types/usage";
 import { useMoneyFormat } from "@/hooks/useMoneyFormat";
+import { useTokenFormat } from "@/hooks/useTokenFormat";
 
 interface UsageHeroProps {
   range: UsageRangeSelection;
@@ -160,6 +160,7 @@ export function UsageHero({
 }: UsageHeroProps) {
   const { t, i18n } = useTranslation();
   const { money, moneyTitle } = useMoneyFormat();
+  const { tokens } = useTokenFormat();
   const locale = getLocaleFromLanguage(getResolvedLang(i18n));
   const [moreOpen, setMoreOpen] = useState(false);
 
@@ -229,7 +230,7 @@ export function UsageHero({
                 title: t("usage.metrics.realTotalHelpTitle"),
                 body: t("usage.metrics.realTotalHelp"),
               }}
-              value={placeholder ?? formatTokensCompact(realTotal, locale)}
+              value={placeholder ?? tokens(realTotal, locale)}
               title={fmtInt(realTotal, locale)}
             />
             <MetricCard
@@ -250,20 +251,18 @@ export function UsageHero({
             >
               <MiniMetric
                 label={t("usage.freshInput")}
-                value={formatTokensCompact(input, locale)}
+                value={tokens(input, locale)}
                 title={fmtInt(input, locale)}
               />
               <MiniMetric
                 label={t("usage.output")}
-                value={formatTokensCompact(output, locale)}
+                value={tokens(output, locale)}
                 title={fmtInt(output, locale)}
               />
               <MiniMetric
                 label={t("usage.cacheWrite")}
                 value={
-                  cacheWriteState === "na"
-                    ? "N/A"
-                    : formatTokensCompact(cacheWrite, locale)
+                  cacheWriteState === "na" ? "N/A" : tokens(cacheWrite, locale)
                 }
                 title={
                   cacheWriteState === "na" ? undefined : fmtInt(cacheWrite)
@@ -277,7 +276,7 @@ export function UsageHero({
               />
               <MiniMetric
                 label={t("usage.cacheRead")}
-                value={formatTokensCompact(cacheRead, locale)}
+                value={tokens(cacheRead, locale)}
                 title={fmtInt(cacheRead, locale)}
               />
             </div>

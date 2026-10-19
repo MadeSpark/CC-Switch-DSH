@@ -2423,6 +2423,10 @@
     "display": {
       "title": "显示",
       "currency": "币种",
+      "tokenUnit": "Token 单位",
+      "tokenUnitIntl": "国际缩写",
+      "tokenUnitZh": "中文单位",
+      "tokenUnitHint": "只改显示：1K · 1M · 1.61B 或 1千 · 100万 · 16.1亿。",
       "rate": "汇率",
       "rateHint": "手动填写，只用于换算显示；费用仍按美元记录。",
       "rateInvalid": "请输入大于 0 的数字",
@@ -4951,8 +4955,6 @@
     }
   },
   "dshRelay": {
-    "title": "DeepSeek Harness",
-    "sectionTitle": "DSH 中转",
     "relayLabel": "使用 CC Switch 中转 DSH 请求",
     "relayDescription": "开启后，DSH 各 provider 的 API 地址会被改写为 CC Switch 的本机中转地址；关闭则立即还原为原始直连地址。",
     "relayHelp": "中转地址通常是 http://127.0.0.1:15721。退出 CC Switch 后中转即失效：若关闭自动还原，DSH 会连不上，需要手动改回直连地址。",
@@ -4984,32 +4986,15 @@
   },
   "dshReasoning": {
     "label": "推理等级",
+    "notSet": "未设置",
     "chipWire": "发送值：{{wire}}",
     "chipSilent": "不发送思考参数",
+    "noParam": "不发送",
+    "keepOne": "至少要保留一个等级",
     "applyPreset": "推荐预设 · {{family}}",
     "recommended": "{{family}} 预设",
     "clear": "清除推理等级",
     "forcedOff": "已强制关闭思考",
-    "adaptive": "已开启自适应思考",
-    "level_off": "关闭",
-    "level_minimal": "最小",
-    "level_low": "低",
-    "level_medium": "中",
-    "level_high": "高",
-    "level_xhigh": "极高",
-    "level_max": "最大"
-  },
-  "dshPreset": {
-    "save": "保存为预设",
-    "saveHint": "把目录里的每个模型（含推理等级）保存成模型预设，之后添加同名模型时会询问是否套用。",
-    "savedNew": "已保存 {{count}} 个模型预设",
-    "savedUpdated": "已保存 {{count}} 个模型预设，其中 {{updated}} 个是更新",
-    "noModels": "还没有填模型 ID，先添加模型再保存为预设",
-    "saveFailed": "保存模型预设失败",
-    "saveDefaults": "设为通用参数",
-    "saveDefaultsHint": "把上面的思考等级和最大 Tokens 存成通用参数",
-    "saveDefaultsHintShort": "新增模型时会用到",
-    "defaultsSaved": "已保存通用参数",
-    "defaultsEmpty": "思考等级和最大 Tokens 都是空的，没有可保存的参数"
+    "adaptive": "已开启自适应思考"
   }
 }

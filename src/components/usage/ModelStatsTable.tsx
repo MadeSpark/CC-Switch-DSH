@@ -3,16 +3,12 @@ import { useTranslation } from "react-i18next";
 import { useModelStats } from "@/lib/query/usage";
 import { TablePagination, useClientPagination } from "./TablePagination";
 import { cn } from "@/lib/utils";
-import {
-  fmtInt,
-  formatTokensCompact,
-  getLocaleFromLanguage,
-  getResolvedLang,
-} from "./format";
+import { fmtInt, getLocaleFromLanguage, getResolvedLang } from "./format";
 import { usageTable } from "./usageTable";
 import { PerformanceCells, PerformanceHeaders } from "./statsColumns";
 import type { UsageRangeSelection } from "@/types/usage";
 import { useMoneyFormat } from "@/hooks/useMoneyFormat";
+import { useTokenFormat } from "@/hooks/useTokenFormat";
 
 interface ModelStatsTableProps {
   range: UsageRangeSelection;
@@ -31,6 +27,7 @@ export function ModelStatsTable({
 }: ModelStatsTableProps) {
   const { t, i18n } = useTranslation();
   const { money, moneyTitle } = useMoneyFormat();
+  const { tokens } = useTokenFormat();
   const locale = getLocaleFromLanguage(getResolvedLang(i18n));
   const { data: stats, isLoading } = useModelStats(
     range,
@@ -94,7 +91,7 @@ export function ModelStatsTable({
                     className={usageTable.td}
                     title={fmtInt(stat.totalTokens, locale)}
                   >
-                    {formatTokensCompact(stat.totalTokens, locale)}
+                    {tokens(stat.totalTokens, locale)}
                   </td>
                   <td
                     className={cn(usageTable.td, "font-medium")}

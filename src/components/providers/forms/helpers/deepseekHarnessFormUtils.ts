@@ -473,6 +473,38 @@ export function dshReasoningEffortsEqual(
 }
 
 /**
+ * 触发器文案：连续三段及以上的等级折叠成 `low → max`，其余按顺序用 `, ` 拼接
+ * （与 Codex 表单的推理等级控件同一套折行规则，只是等级表换成 DSH 的）。
+ * 传入的等级不是从弱到强的顺序（例如网关自定义等级）时原样拼出来，
+ * 免得暗示中间那几个没勾选的等级也被选中了。
+ */
+export function formatDshReasoningLevelsLabel(levels: string[]): string {
+  const canonical = DSH_REASONING_LEVELS as readonly string[];
+  const positions = levels.map((level) => canonical.indexOf(level));
+  const ordered = positions.every(
+    (position, index) =>
+      position >= 0 && (index === 0 || position > positions[index - 1]),
+  );
+  if (!ordered) return levels.join(", ");
+
+  const parts: string[] = [];
+  let runStart = 0;
+  for (let index = 1; index <= levels.length; index += 1) {
+    const continues =
+      index < levels.length && positions[index] === positions[index - 1] + 1;
+    if (continues) continue;
+    const run = levels.slice(runStart, index);
+    if (run.length >= 3) {
+      parts.push(`${run[0]} → ${run[run.length - 1]}`);
+    } else {
+      parts.push(...run);
+    }
+    runStart = index;
+  }
+  return parts.join(", ");
+}
+
+/**
  * 某等级实际要发的值：优先用推荐值，否则 `off` → `null`，其余等级发等级名本身。
  */
 export function dshReasoningWireFor(
@@ -504,70 +536,4 @@ export function toggleDshReasoningLevel(
 /** DSH credential reference names must match the backend's env-var pattern. */
 export function isValidCredentialRef(value: string): boolean {
   return /^[A-Z_][A-Z0-9_]*$/.test(value);
-}
-
-// ── 模型预设 ⇄ DSH 行级参数 ─────────────────────────────────────────
-//
-// 模型预设（`ModelPresetParams`）只有 contextWindow / maxOutputTokens /
-// reasoningEffort / temperature / extraParams 几个字段，装不下「每行一份
-// reasoningEfforts」。DSH 行级参数就放进 extraParams 的命名空间键里，
-// 后端是 BTreeMap<String, Value>，原样存、原样读，别的 app 的预设不受影响。
-
-/** 预设 `extraParams` 里保存 DSH 行级参数用的键名。 */
-export const DSH_PRESET_EXTRAS_KEY = "dsh";
-
-export interface DshPresetExtras {
-  reasoningEfforts?: DshReasoningEfforts | false;
-  input?: unknown;
-  compat?: Record<string, unknown>;
-}
-
-/** 深拷贝预设里能落盘的纯数据，避免存完之后表单改动把预设里的对象一起改掉。 */
-function cloneDshPresetValue(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(cloneDshPresetValue);
-  if (isPlainObject(value)) {
-    const copy: Record<string, unknown> = {};
-    for (const [key, item] of Object.entries(value)) {
-      copy[key] = cloneDshPresetValue(item);
-    }
-    return copy;
-  }
-  return value;
-}
-
-/** 把模型行上的 DSH 行级参数收进 `extraParams.dsh`；没有可存的就返回 undefined。 */
-export function buildDshPresetExtras(
-  model: DshModel,
-): Record<string, unknown> | undefined {
-  const extras: Record<string, unknown> = {};
-  const reasoningEfforts = normalizeDshReasoningEfforts(model.reasoningEfforts);
-  if (reasoningEfforts !== undefined)
-    extras.reasoningEfforts = reasoningEfforts;
-  if (model.input !== undefined) {
-    extras.input = cloneDshPresetValue(model.input);
-  }
-  if (isPlainObject(model.compat) && Object.keys(model.compat).length > 0) {
-    extras.compat = cloneDshPresetValue(model.compat) as Record<
-      string,
-      unknown
-    >;
-  }
-  return Object.keys(extras).length > 0 ? extras : undefined;
-}
-
-/** 从预设的 `extraParams` 里还原 DSH 行级参数（没有这个命名空间就返回空对象）。 */
-export function pickDshPresetExtras(
-  extraParams?: Record<string, unknown> | null,
-): DshPresetExtras {
-  const extras: DshPresetExtras = {};
-  if (!extraParams) return extras;
-  const raw = extraParams[DSH_PRESET_EXTRAS_KEY];
-  if (!isPlainObject(raw)) return extras;
-
-  const reasoningEfforts = normalizeDshReasoningEfforts(raw.reasoningEfforts);
-  if (reasoningEfforts !== undefined)
-    extras.reasoningEfforts = reasoningEfforts;
-  if (raw.input !== undefined) extras.input = raw.input;
-  if (isPlainObject(raw.compat)) extras.compat = raw.compat;
-  return extras;
 }

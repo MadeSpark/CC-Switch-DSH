@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
-import { formatTokensShort } from "./format";
 import { useMoneyFormat } from "@/hooks/useMoneyFormat";
+import { useTokenFormat } from "@/hooks/useTokenFormat";
 
 interface UsageTooltipCardProps {
   heading: string;
@@ -19,15 +19,16 @@ export function UsageTooltipCard({
 }: UsageTooltipCardProps) {
   const { t, i18n } = useTranslation();
   const { money } = useMoneyFormat();
+  const { tokensShort } = useTokenFormat();
   const language = i18n.resolvedLanguage || i18n.language || "en";
   const rows = [
     {
       label: t("usage.trend.tokens"),
-      value: formatTokensShort(tokens, language),
+      value: tokensShort(tokens, language),
     },
     {
       label: t("usage.trend.requests"),
-      value: formatTokensShort(requests, language),
+      value: tokensShort(requests, language),
     },
     {
       label: t("usage.trend.cost"),

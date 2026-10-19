@@ -27,8 +27,9 @@
 5. **构建与运行环境的本地适配**：离线 Rust 工具链、本地 cargo 缓存与 pnpm shim；DSH 相关 Rust/前端集成细节（详见 [docs/architecture/dsh-native.md](docs/architecture/dsh-native.md)）。
 6. **DSH token 消耗统计**：导入 `~/.dsh/sessions/**/session.v4.jsonl.zstd` 会话日志，将 assistant 用量写入统一统计，并通过记录 ID 与文件游标去重。
 7. **DSH 中转与退出还原**：支持将 DSH provider 的 `baseURL` 指向 CC Switch 本机中转路由，并在用户主动退出 CCS 时恢复原始 API 地址。
-8. **DSH 模型预设**：支持把当前模型目录一键保存为模型预设，以及把当前生成参数保存为通用参数。
-9. **DSH 模型级推理等级**：模型行支持七档 reasoning effort、推荐预设和单行清除，配置写入 `providers.<id>.models[].reasoningEfforts`。
+8. **DSH 模型预设改为内联编辑**：DSH 里不再提供保存/套用模型预设的入口，也不能把生成参数另存成通用参数；模型参数直接按 OpenCode 那种方式在模型行里改（模型 ID、显示名称、上下文窗口、推理等级）。全局的「设置 → 模型预设」页面、以及 Codex / Claude Code 各自的预设功能都还在。
+9. **DSH 模型级推理等级**：模型行里点开「推理等级」下拉，多选英文档位（`off/minimal/low/medium/high/xhigh/max`），也能套用模型族推荐预设或一键清空，配置写入 `providers.<id>.models[].reasoningEfforts`。
+10. **用量页 Token 计数单位**：用量页「顯示」里可选国际缩写（`1K` / `1M` / `1.61B`）或中文单位（`1千` / `100万` / `16.1亿`），选择存进 `settings.json` 的 `usageDisplay.tokenUnit`；指标卡、统计表、请求日志、图表轴、侧栏「今日」与会话详情统一跟随，悬停仍显示精确整数。
 
 ## 使用限制 / Usage restrictions
 

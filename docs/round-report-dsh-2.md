@@ -32,9 +32,10 @@
 - 服务：`src-tauri/src/services/dsh_relay.rs`（`attach` / `detach` / `restore_original` / `heal_on_startup` / 快照读写），侧车状态 `~/.cc-switch/dsh_relay_state.json`。
 - 透传：`src-tauri/src/proxy/dsh_relay.rs` + `src-tauri/src/proxy/server.rs` 的两条 `/dsh/*` 路由（在 `DefaultBodyLimit` 之前注册）。
 - 退出链路复用既有 `cleanup_before_exit`：`detach_all(...)` 之后调用 `restore_dsh_relay_on_exit()`，托盘退出、`app.exit(0)` 走同一条路。
-- 设置：`dshRelayEnabled`（默认 false）/ `dshRestoreOnExit`（默认 true），前端 `src/lib/api/dsh.ts`、`src/lib/query/dsh.ts`、`src/components/settings/sections/DshSection.tsx`，侧栏“設定 → DSH 中轉”。
+- 设置：`dshRelayEnabled`（默认 false）/ `dshRestoreOnExit`（默认 true），前端 `src/lib/api/dsh.ts`、`src/lib/query/dsh.ts`、`src/components/settings/sections/DshSection.tsx`，侧栏“設定 → DSH 中轉”（`4.0.14-dsh.4` 起入口迁到应用页，见本节补充）。
 - 文案：`dshRelay.*` 30 个键 × 5 语言（中/繁/英/日/土）。
 - 文档：`docs/DSH-RELAY.md`。
+- **补充（`4.0.14-dsh.4`）**：中转入口已从设置页迁到应用页——侧栏选 DeepSeek Harness 后，页头是「直连」和「路由」两个页签，中转开关、退出还原开关与地址映射都在「路由」页签里；设置页不再有「DSH 中转」分组，旧的 `section: "dsh"` 会落到设置页的「本地路由」。命令、默认值（`dshRelayEnabled=false`、`dshRestoreOnExit=true`）和侧车文件均未变，上面的 `dsh.3` 实测数据对应的是迁移前的界面。
 
 ### 3. 一键模型预设与默认参数
 
@@ -48,6 +49,17 @@
 - 七档：`DSH_REASONING_LEVELS` = `off` / `minimal` / `low` / `medium` / `high` / `xhigh` / `max`。
 - 模型族推荐表 `dshReasoningPresetFor`（GPT、OpenAI o 系列、Claude、Grok、GLM、MiMo），档位与 `dsh-desktop-ui-reasoning-effort` 插件 `lib/client.js` 的 `presetFor` 对齐；`dshReasoningWireFor` 负责 `off` → `"none"` 等 wire 值映射。
 - 交互：`handleToggleReasoningLevel` / `handleApplyReasoningPreset` / `handleClearReasoningEfforts`，模型行内的等级胶囊控件。
+- **补充（`4.0.14-dsh.4`）**：上面 §3 的「保存为预设 / 设为通用参数 / 套用推荐预设」三个入口已按需求整体移除（对齐 OpenCode 的纯内联字段），`buildDshPresetExtras` / `pickDshPresetExtras` / `DshPresetExtras` 与 `dshPreset.*` 文案一并删除；全局「设置 → 模型预设」与 Codex / Claude 侧不受影响，`docs/DSH-MODEL-PRESETS.md` 已改写为「现状 + 历史」。§4 的行内胶囊控件换成 Codex 同款下拉面板（触发器 + 七行 `role="checkbox"`），档位名直接用英文原文不再翻译，折叠文案见 `formatDshReasoningLevelsLabel`。`dshRelay.*` 从 30 个键减到 28 个（复用做设置页标题的 `title` / `sectionTitle` 随入口迁移删除）。
+
+### 5. 用量页 Token 计数单位（`4.0.14-dsh.4`）
+
+- 需求：用量统计页给 token 增加「计数单位」选择——国际缩写（`1K` / `1M` / `1.61B`）或中文单位（`1千` / `100万` / `16.1亿`）。
+- 设置：`AppSettings.usage_display.token_unit`（Rust `UsageDisplaySettings.token_unit`，`Option<String>` + `skip_serializing_if`，老 `settings.json` 缺字段即 `intl`）；前端 `UsageDisplaySettings.tokenUnit`，`resolveTokenUnit` 把认不出的值兜成 `intl`。
+- 界面：用量页「顯示」页签里，币种下方新增 `Select`（`aria-label` = `usage.display.tokenUnit`）+ 一行 hint；切换即时生效并写回设置，保存失败回滚。
+- 格式化：`src/components/usage/format.ts` 收敛成一条 `formatTokenValue` —— 单位表 `K/M/B`（1e3/1e6/1e9）与 `千/万/亿`（1e3/1e4/1e8，繁中用 `億/萬`）、最多 3 位有效数字、尾零去掉、`999.95K→1M`、`9999千→1万` 双向进位；`formatTokensCompact(value, locale?, unit)` 与 `formatTokensShort(value, lang, unit)` 共用它。中文按需求实现为 千/万/亿，1000 以下直接写数字（不引入「百」）。
+- 统一出口：新增 `src/hooks/useTokenFormat.ts`（读 `useSettingsQuery()`，与 `useMoneyFormat` 同构）；`UsageHero`、`ModelStatsTable`、`ProviderStatsTable`、`RequestLogTable`、`UsageHeatmap`、`UsageTooltipCard`、`UsageTrendChart`（Y 轴刻度）、侧栏「今日」、会话详情头部的 token 汇总全部改走它，避免「Hero 显示 6亿、Y 轴显示 600M」的旧不一致。
+- 副作用（有意为之）：缩写门槛从 1 万下调到 1 千（`5000` → `5K` / `5千`），因为需求示例 `1K` 就是千级；精确整数仍在 `title` 里。默认单位是 `intl`，老用户外观只在这类四位数上变化。
+- 文案：`usage.display.tokenUnit` / `tokenUnitIntl` / `tokenUnitZh` / `tokenUnitHint` × 4 语言（en/zh/zh-TW/ja）。土耳其语整块 `usage.display` 上游就缺（连币种都没有），维持回退英文，不凭空翻译。
 
 ## 验证方式与结果
 
@@ -64,46 +76,50 @@
   - `SUM(input_tokens) = 105,630,281`、`SUM(output_tokens) = 16,100,843`、`SUM(cache_read_tokens) = 866,750,547`、`SUM(cache_creation_tokens) = 0`
   - `suspected_duplicates = 0`；抽查三条原始记录与入库行，均满足 `inputTokens + outputTokens + cacheReadTokens = totalTokens`。
 
-### 2. 端到端 GUI 冒烟（`ccswitch-dsh-round-smoke.cjs`，7/7 通过）
+### 2. 端到端 GUI 冒烟（`ccswitch-dsh-round-smoke.cjs`，8/8 通过）
 
-在部署版 `D:\Tools\CCSwitch\cc-switch.exe`（`4.0.14-dsh.3`）上通过 CDP 驱动真实界面，`SMOKE_EXIT=0`：
+在部署版 `D:\Tools\CCSwitch\cc-switch.exe`（`4.0.14-dsh.4`）上通过 CDP 驱动真实界面，`SMOKE PASSED` / exit 0，用时 29.7 s，`locale` 探测为 `zh-TW`：
 
 | 步骤 | 结果 | 实测要点 |
 | --- | --- | --- |
-| `r2.relay-status` | PASS | 状态命令返回 `relayEnabled=false` / `restoreOnExit=true` / `attached=false`，provider 列表结构完整 |
-| `r2.settings-section` | PASS | 侧栏“DSH 中轉”可进入，locale 探测为 `zh-TW`，降级提示未出现 |
-| `r2.restore-toggle` | PASS | 两个开关可切换并持久化（`restoreOnExit` 翻转后读回一致，最终复原） |
-| `r2.attach-detach` | PASS | 开→6 个 provider 全部改写为 `http://127.0.0.1:15721/dsh/<id>`；关→`cordis.patch.yml` 与开之前**逐字节一致** |
-| `r4.reasoning-levels` | PASS | 每行 7 个等级胶囊（共 50 个），点击后 `aria-pressed` 由 `false` → `true` |
-| `r3.save-as-preset` | PASS | 预设数 `0 → 7`（WorkBuddy 线路 7 个模型一键入库），随后复原 |
-| `r1.token-usage` | PASS | 应用筛选条出现 DeepSeek Harness 图标；同步 `imported=3 / skipped=87`，`dataSource = dsh_session / 11,996 请求 / $192.769171`，汇总含 `cacheReadTokens`、`cacheHitRate=0.8918`，切到 DSH 过滤后列表仍显示 DSH 行 |
+| `r2.relay-status` | PASS | 状态命令返回 `relayEnabled=false` / `restoreOnExit=true` / `attached=false`，6 个 provider 全直连 |
+| `r2.relay-tab` | PASS | DSH 应用页两个页签 `#dsh-page-providers` / `#dsh-page-dshRelay` 可切换，`uiSwitches=2`，侧栏旧「DSH 中轉」设置组已消失，降级提示未出现 |
+| `r2.restore-toggle` | PASS | `restoreOnExit` 翻转 `true → false` 后读回一致（随后复原） |
+| `r2.attach-detach` | PASS | 开→5 个有 `baseURL` 的 provider 改写为 `http://127.0.0.1:15721/dsh/<id>`（`deepseek-official` 无 baseURL，不参与）；关→`cordis.patch.yml` 与开之前**逐字节一致** |
+| `r4.reasoning-popover` | PASS | 目标 provider `spacetimeai`（5 个模型行）：弹层 7 档顺序 `off,minimal,low,medium,high,xhigh,max`，收起态为区间折叠 `off, low → max`，勾选后变 `off → max` 并复现；`aria-expanded` 正确；provider 级 `#dsh-reasoning-effort` / `#dsh-max-tokens` 各 1 个 |
+| `r3.preset-entries-removed` | PASS | 5 个模型行、15 个标签检查完毕，保存/套用预设的入口确实不存在 |
+| `r1.token-usage` | PASS | 同步 `imported=88 / skipped=88 / filesScanned=169 / errors=0`；`dataSource = dsh_session`、`13,370` 请求、`$193.414118`、`realTotalTokens=1,075,496,484`（cacheRead `945,587,155`、命中率 `0.8939`）；应用筛选条出现 Harness 图标，过滤后列表仍显示 DSH 行 |
+| `r5.token-unit` | PASS | 「顯示」里出现两个 combobox（幣別 + `Token 單位`，`aria-label="Token 單位"`）；选项 `國際縮寫` / `中文單位`；同一数值 `442,242,014` 实测渲染 中文 **`4.42億`** ↔ 国际 **`442M`**，两者 `title` 恒为精确整数 `442,242,014`；`settings.usageDisplay.tokenUnit` 写入 `zh` / `intl` 并读回一致，跑完删除字段回到默认 |
 
-### 3. 退出还原端到端（`ccswitch-dsh-exit-smoke.cjs`，3/3 通过）
+### 3. 退出还原端到端（`ccswitch-dsh-exit-smoke.cjs`，4/4 通过）
 
-因为“还原后的状态”只在进程不在时存在，分三段跑，每段都在真实进程上做：
+因为“还原后的状态”只在进程不在时存在，分四段跑，每段都在真实进程上做：
 
 | 阶段 | 结果 | 实测要点 |
 | --- | --- | --- |
-| `attach-exit` | PASS | 开中转（6 个 provider 改写）→ 走与托盘退出相同的 `plugin:process|exit` → 进程退出 → `cordis.patch.yml` 与备份**逐字节一致**（13,930 B，无 `/dsh/` 残留）、侧车 `attached:false` |
-| `verify-restart` | PASS | 重启后无需任何点击：开关为开即自动重新挂载 6 个 provider；再次退出后同样逐字节还原、侧车 `attached:false` |
-| `restore-switch` | PASS | 把开关与 `restoreOnExit` 恢复成测试前的值（`relayEnabled=false`、`restoreOnExit=true`），退出后 patch 仍与备份逐字节一致 |
+| `attach-exit` | PASS | 开中转（5 个 provider 改写）→ 走 `plugin:process|exit` 真退出（进程 2 s 内消失）→ `cordis.patch.yml` 与备份**逐字节一致**（13,300 B，无 `/dsh/` 残留）、侧车 `attached:false` |
+| `verify-restart` | PASS | 重启后无需任何点击：开关为开即自动重新挂载 5 个 provider；再次退出后同样逐字节还原、侧车 `attached:false` |
+| `check-after-exit` | PASS | 退出后复核：patch 里 0 条中转地址 |
+| `restore-switch` | PASS | 把开关恢复成测试前的值（`relayEnabled=false`、`restoreOnExit=true`），detach 成功，再次退出后 patch 仍与备份逐字节一致 |
 
 ### 4. 前端静态检查与单测
 
-- `tsc --noEmit`：0 错误；`prettier --check`：无差异。
-- 本轮新增/更新的测试：`tests/components/AppGlyph.decorativeSvgTitle.test.tsx`、`DeepSeekHarnessFormFields.reasoningEfforts.test.tsx`、`DshSection.test.tsx`、`DshUsageAppType.test.ts`、`dshReasoningPresetMirror.test.ts`，全部通过。
-- 全量 `vitest run`：`Test Files 241 passed / 4 failed (245)`、`Tests 3,221 passed / 7 failed (3,228)`；7 个失败全部落在既有并行负载敏感组（`AppsPage.test.tsx`、`IconPicker.test.tsx`、`PiProviderForm.test.tsx`、`tests/integration/App.test.tsx`），单独运行均通过，与本轮改动无关。
+- `tsc --noEmit`：0 错误；`prettier --check`：本轮改动的源码与测试无差异（仓库里的 md 文件上游就没过 prettier，未强行格式化）。
+- 本轮新增/更新的测试：`tests/hooks/useTokenFormat.test.tsx`（新）、`tests/components/usageFormat.test.ts`、`UsageDisplaySection.test.tsx`、`UsageTrendChart.test.ts`、`SidebarToday.test.tsx`，以及 DSH 侧的 `DeepSeekHarnessFormFields.reasoningEfforts.test.tsx`、`DshRelayPanel.test.tsx`（新）、`DshSurface.test.ts`、`DshUsageAppType.test.ts`、`dshReasoningPresetMirror.test.ts`，全部通过。
+- 全量 `vitest run`：`Test Files 240 passed / 4 failed (244)`、`Tests 3,216 passed / 11 failed (3,227)`；11 个失败全部落在既有并行负载敏感组（`tests/integration/App.test.tsx`、`AppsPage.test.tsx`、`PiProviderForm.test.tsx`、`IconPicker.test.tsx`），单独重跑 4 个套件 `133 passed` 全绿，与本轮改动无关。
 
 ### 5. 构建与部署
 
-- 离线构建：`pnpm tauri build --no-bundle` 成功（前端 `✓ built in 12.06s`，`Finished release profile in 4m 45s`）。
-- 产物：`D:\Tools\CCSwitch\cc-switch.exe`，`4.0.14-dsh.3`，43,118,592 B，SHA256 `9E153CEDF3109BD56F5426FF3C14C7C33489826AC802B3C6EAD77B5484A779A1`；旧版留在 `cc-switch-4.0.14-dsh.{1,2}.exe.bak`。
+- 离线构建：`pnpm tauri build --no-bundle` 成功（前端 `✓ built in 25.49s`，`Finished release profile in 7m 55s`）。
+- 产物：`D:\Tools\CCSwitch\cc-switch.exe`，`4.0.14-dsh.4`，43,122,176 B，SHA256 `A2685390BC5CCB255819B4B9CFD9876BBC0526D8BEEA6E641D02E2FC7A628C8E`；dsh.3 留在 `cc-switch-4.0.14-dsh.3.exe.bak`（SHA256 `9E153CED…A779A1`）。
+- 「關於」页与侧栏页脚实测均为 `v4.0.14-dsh.4`。
 
 ### 6. 验证后现场状态
 
-- `~/.dsh/profiles/desktop/cordis.patch.yml` 已恢复为测试前内容（0 处 `/dsh/` 地址）。
+- `~/.dsh/profiles/desktop/cordis.patch.yml` 已恢复为测试前内容（0 处 `/dsh/` 地址，SHA256 `3F27C3BA…DBC4`）。
 - 侧车 `~/.cc-switch/dsh_relay_state.json` = `{"attached":false,"baseUrl":null,"providers":[]}`。
-- `dshRelayEnabled=false`、`dshRestoreOnExit=true`、模型预设清回测试前状态；CCS 进程已退出。
+- `dshRelayEnabled=false`、`dshRestoreOnExit=true`、`usageDisplay.tokenUnit` 已删除（回到默认 `intl`）；CCS 以新版本在运行。
+- 截图（`D:\DevelopmentFolder\默认工作区\ccswitch-dsh-round-shots\`）：`01`–`04` 中转页与接管/还原、`05` 推理等级弹层、`06`–`07` 用量看板与 DSH 过滤、`08` Token 单位下拉、`09` 關於页版本。
 
 ## 已知限制
 
@@ -113,6 +129,8 @@
 - 端口占用、多开 CCS、用户在 DSH 里手工改 provider 等场景仍需结合实际环境排查。
 - DSH 表单没有 temperature 专用控件，预设里的 temperature 会被跳过（见 `docs/DSH-MODEL-PRESETS.md`）。
 - 只产出 exe，没有打 NSIS 安装包；Apps 页仍没有 DSH 这一行；DSH 的 MCP 上游本就不支持。
+- token 计数单位：中文单位只实现 千 / 万 / 亿，1,000 以下直接写阿拉伯数字（需求里的「百」没有单独档位，`123` 仍是 `123`）；两套单位的缩写门槛都是 1,000，所以 `5,000` 现在显示 `5K` / `5千`（旧版 1 万以下写全数，`5,000`）——这是按需求示例 `1K` 做的取舍。趋势图 Y 轴与 tooltip 里的「请求数」和 token 共用同一个格式化函数，因此请求数也会变成 `1.2万` 这类写法。
+- 土耳其语（`tr`）缺整个 `usage.display` 文案块（连币种、汇率、侧栏今日都没有），上游即如此，本轮未补，回退英文。
 
 ## 升级/回滚步骤
 
@@ -120,10 +138,11 @@
 
 1. 备份 CC Switch 数据库（`~/.cc-switch/cc-switch.db`）、设置文件和 DSH provider 配置（`~/.dsh/profiles/desktop/cordis.patch.yml`）。
 2. 确认工作区仍基于上游 `main@73f37c4`（v4.0.14）与 PR #7356，保留个人来源声明（`PERSONAL-NOTICE.md` / `README.md`）。
-3. 覆盖 `D:\Tools\CCSwitch\cc-switch.exe`，启动后在“設定 → DSH 中轉”确认开关状态与 provider 映射。
+3. 覆盖 `D:\Tools\CCSwitch\cc-switch.exe`，启动后进入 DeepSeek Harness 应用页的「路由」页签（`4.0.14-dsh.4` 起；此前在设置页的「DSH 中转」），确认开关状态与 provider 映射。
 4. 用量页“資料 → 数据来源”确认自动同步开启，执行一次历史日志同步并核对 `DeepSeek Harness (Session)`。
 5. 需要中转时再打开开关：先确认直连地址已记录，再验证“退出 CCS 即还原”。
-6. 逐个验证模型预设与推理等级，然后开始正常使用。
+6. 逐个验证模型行内的推理等级；需要中文数位时，到用量页「顯示」把 Token 单位切到「中文单位」，再回来看指标卡与列表是否跟随。
+7. 然后开始正常使用。
 
 ### 回滚
 

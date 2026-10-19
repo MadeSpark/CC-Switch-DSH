@@ -22,10 +22,10 @@ function describeError(error: unknown): string {
 }
 
 /**
- * 设置 → DeepSeek Harness：是否让 DSH 的请求走 CC Switch 的本机中转，
+ * DeepSeek Harness 应用页 → 路由页签：是否让 DSH 的请求走 CC Switch 的本机中转，
  * 以及退出 CC Switch 时是否自动把 DSH 的 API 地址还原成直连。
  */
-export function DshSection() {
+export function DshRelayPanel() {
   const { t } = useTranslation();
   const { data: status, isLoading, isFetching, refetch } = useDshRelayStatus();
   const setRelay = useSetDshRelay();
@@ -43,7 +43,7 @@ export function DshSection() {
         enabled ? t("dshRelay.relayEnabled") : t("dshRelay.relayDisabled"),
       );
     } catch (error) {
-      console.error("[DshSection] Failed to toggle DSH relay", error);
+      console.error("[DshRelayPanel] Failed to toggle DSH relay", error);
       toast.error(t("dshRelay.relayFailed", { detail: describeError(error) }));
     }
   };
@@ -55,7 +55,7 @@ export function DshSection() {
         enabled ? t("dshRelay.restoreEnabled") : t("dshRelay.restoreDisabled"),
       );
     } catch (error) {
-      console.error("[DshSection] Failed to toggle DSH restore-on-exit", error);
+      console.error("[DshRelayPanel] Failed to toggle DSH restore-on-exit", error);
       toast.error(
         t("dshRelay.restoreFailed", { detail: describeError(error) }),
       );
@@ -63,15 +63,8 @@ export function DshSection() {
   };
 
   return (
-    <>
+    <div className="space-y-7">
       <SettingsBlock>
-        {/* 应用显示名：页标题是「DSH 中转」，这行点明配置的是哪个应用。
-            说明文字复用 relayLabel，不为这一行新增 i18n 键。 */}
-        <p className="text-caption text-fg-3">
-          <span className="font-medium text-fg-1">{t("dshRelay.title")}</span>
-          <span className="px-1.5">·</span>
-          {t("dshRelay.relayLabel")}
-        </p>
         <SettingsCard>
           <SettingsSwitchRow
             label={t("dshRelay.relayLabel")}
@@ -231,6 +224,6 @@ export function DshSection() {
           )}
         </SettingsCard>
       </SettingsBlock>
-    </>
+    </div>
   );
 }
