@@ -1056,7 +1056,12 @@
       "network": "網路",
       "data": "資料",
       "about": "關於",
-      "modelPresets": "模型預設"
+      "modelPresets": "模型預設",
+      "modelPricing": "模型定價"
+    },
+    "modelPricing": {
+      "title": "模型價格表",
+      "description": "用量成本按這裡的單價估算。可手動修改、新增，或從 models.dev 同步；同步所選模型會覆蓋同名價格。"
     },
     "appConfig": {
       "configDir": "設定目錄"

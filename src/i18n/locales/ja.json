@@ -1055,7 +1055,12 @@
       "network": "ネットワーク",
       "data": "データ",
       "about": "情報",
-      "modelPresets": "モデルプリセット"
+      "modelPresets": "モデルプリセット",
+      "modelPricing": "モデル料金"
+    },
+    "modelPricing": {
+      "title": "モデル料金表",
+      "description": "使用量のコストはこの単価で見積もられます。手動で編集・追加するか、models.dev から同期できます。選択したモデルを同期すると同名の料金は上書きされます。"
     },
     "appConfig": {
       "configDir": "設定ディレクトリ"

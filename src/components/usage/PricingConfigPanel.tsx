@@ -307,7 +307,10 @@ function BillingDefaultsRow() {
   );
 }
 
-/** 定价子页签（v7 S6）：models.dev 同步、计费默认配置、模型定价表。 */
+/**
+ * 模型定价面板：models.dev 同步、计费默认配置、模型定价表。
+ * 用量页的「定价」子页签与设置的「模型定价」分区复用同一份实现。
+ */
 export function PricingConfigPanel() {
   const { t } = useTranslation();
   const { data: pricing, isLoading, error } = useModelPricing();

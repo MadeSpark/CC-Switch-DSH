@@ -1040,7 +1040,12 @@
       "network": "Ağ",
       "data": "Veri",
       "about": "Hakkında",
-      "modelPresets": "Model ön ayarları"
+      "modelPresets": "Model ön ayarları",
+      "modelPricing": "Model fiyatlandırması"
+    },
+    "modelPricing": {
+      "title": "Model fiyat tablosu",
+      "description": "Kullanım maliyetleri bu birim fiyatlara göre tahmin edilir. Fiyatları elle düzenleyin veya ekleyin, ya da models.dev'den eşitleyin; seçili modelleri eşitlemek aynı adlı fiyatların üzerine yazar."
     },
     "appConfig": {
       "configDir": "Yapılandırma dizini"

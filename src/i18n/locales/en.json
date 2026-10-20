@@ -1055,7 +1055,12 @@
       "network": "Network",
       "data": "Data",
       "about": "About",
-      "modelPresets": "Model presets"
+      "modelPresets": "Model presets",
+      "modelPricing": "Model pricing"
+    },
+    "modelPricing": {
+      "title": "Model price table",
+      "description": "Usage costs are estimated from these unit prices. Edit or add prices manually, or sync from models.dev; syncing selected models overwrites matching prices."
     },
     "appConfig": {
       "configDir": "Config directory"

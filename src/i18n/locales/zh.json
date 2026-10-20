@@ -1055,7 +1055,12 @@
       "network": "网络",
       "data": "数据",
       "about": "关于",
-      "modelPresets": "模型预设"
+      "modelPresets": "模型预设",
+      "modelPricing": "模型定价"
+    },
+    "modelPricing": {
+      "title": "模型价格表",
+      "description": "用量成本按这里的单价估算。可手动修改、新增，或从 models.dev 同步；同步所选模型会覆盖同名价格。"
     },
     "appConfig": {
       "configDir": "配置目录"

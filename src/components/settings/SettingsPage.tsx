@@ -8,6 +8,7 @@ import {
   type ComponentType,
 } from "react";
 import {
+  CircleDollarSign,
   Database,
   Folder,
   FolderOpen,
@@ -43,6 +44,7 @@ import { LogConfigPanel } from "@/components/settings/LogConfigPanel";
 import { GeneralSection } from "@/components/settings/sections/GeneralSection";
 import { AppConfigSection } from "@/components/settings/sections/AppConfigSection";
 import { ModelPresetsSection } from "@/components/settings/sections/ModelPresetsSection";
+import { ModelPricingSection } from "@/components/settings/sections/ModelPricingSection";
 import {
   SettingsBlock,
   SettingsBody,
@@ -61,6 +63,7 @@ const SECTION_ICON: Record<
   general: SlidersHorizontal,
   appConfig: Folder,
   modelPresets: ListChecks,
+  modelPricing: CircleDollarSign,
   routing: Route,
   network: Globe,
   data: Database,
@@ -360,7 +363,10 @@ export function SettingsPage({
     [autoSaveSettings, settings, t, updateSettings],
   );
 
-  const isBusy = useMemo(() => isLoading && !settings, [isLoading, settings]);
+  const isBusy = useMemo(
+    () => section !== "modelPricing" && isLoading && !settings,
+    [section, isLoading, settings],
+  );
   const SectionIcon = SECTION_ICON[section];
 
   const appConfigDirty =
@@ -368,6 +374,8 @@ export function SettingsPage({
     (initialAppConfigDir?.trim() || undefined);
 
   const renderSection = () => {
+    // 价格表是独立数据，不依赖应用设置；设置还没加载完也能先改价。
+    if (section === "modelPricing") return <ModelPricingSection />;
     if (!settings) return null;
     switch (section) {
       case "general":
