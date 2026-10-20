@@ -25,8 +25,6 @@ export interface DeepSeekHarnessFormState {
   setDshProviderKey: (key: string) => void;
   dshDisplayName: string;
   handleDshDisplayNameChange: (displayName: string) => void;
-  dshReasoningEffort: string;
-  handleDshReasoningEffortChange: (value: string) => void;
   dshMaxTokens: string;
   handleDshMaxTokensChange: (value: string) => void;
   dshIsOfficial: boolean;
@@ -92,13 +90,6 @@ export function useDeepSeekHarnessFormState({
             : DSH_CUSTOM_DEFAULT_CONFIG
           ).displayName ?? "Custom DSH",
         );
-  });
-
-  const [dshReasoningEffort, setDshReasoningEffort] = useState<string>(() => {
-    if (appId !== "deepseek-harness") return "";
-    return typeof initial.reasoningEffort === "string"
-      ? initial.reasoningEffort
-      : "";
   });
 
   const [dshMaxTokens, setDshMaxTokens] = useState<string>(() => {
@@ -190,18 +181,6 @@ export function useDeepSeekHarnessFormState({
         const value = displayName.trim();
         if (value) config.displayName = value;
         else delete config.displayName;
-      });
-    },
-    [updateDshSettings],
-  );
-
-  const handleDshReasoningEffortChange = useCallback(
-    (value: string) => {
-      setDshReasoningEffort(value);
-      updateDshSettings((config) => {
-        const normalized = value.trim();
-        if (normalized) config.reasoningEffort = normalized;
-        else delete config.reasoningEffort;
       });
     },
     [updateDshSettings],
@@ -305,11 +284,6 @@ export function useDeepSeekHarnessFormState({
               ).displayName ?? "Custom DSH",
             ),
       );
-      setDshReasoningEffort(
-        typeof source.reasoningEffort === "string"
-          ? source.reasoningEffort
-          : "",
-      );
       setDshMaxTokens(
         typeof source.maxTokens === "number" &&
           Number.isSafeInteger(source.maxTokens) &&
@@ -340,8 +314,6 @@ export function useDeepSeekHarnessFormState({
     setDshProviderKey,
     dshDisplayName,
     handleDshDisplayNameChange,
-    dshReasoningEffort,
-    handleDshReasoningEffortChange,
     dshMaxTokens,
     handleDshMaxTokensChange,
     dshIsOfficial,

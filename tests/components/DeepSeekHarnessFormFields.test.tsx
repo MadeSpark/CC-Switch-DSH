@@ -35,8 +35,6 @@ const renderFields = (overrides: Partial<DshFieldsProps> = {}) => {
     isOfficial: false,
     displayName: "Custom DSH",
     onDisplayNameChange: vi.fn(),
-    reasoningEffort: "",
-    onReasoningEffortChange: vi.fn(),
     maxTokens: "",
     onMaxTokensChange: vi.fn(),
     apiKey: "sk-test",
@@ -70,27 +68,25 @@ const renderFields = (overrides: Partial<DshFieldsProps> = {}) => {
 describe("DeepSeekHarnessFormFields", () => {
   it("updates display name and generation options", () => {
     const onDisplayNameChange = vi.fn();
-    const onReasoningEffortChange = vi.fn();
     const onMaxTokensChange = vi.fn();
     renderFields({
       onDisplayNameChange,
-      onReasoningEffortChange,
       onMaxTokensChange,
     });
 
     fireEvent.change(screen.getByLabelText("deepseekHarness.displayName"), {
       target: { value: "Company Gateway" },
     });
-    fireEvent.change(screen.getByLabelText("deepseekHarness.reasoningEffort"), {
-      target: { value: "high" },
-    });
     fireEvent.change(screen.getByLabelText("deepseekHarness.maxTokens"), {
       target: { value: "64000" },
     });
 
     expect(onDisplayNameChange).toHaveBeenCalledWith("Company Gateway");
-    expect(onReasoningEffortChange).toHaveBeenCalledWith("high");
     expect(onMaxTokensChange).toHaveBeenCalledWith("64000");
+    // 供应商级思考强度输入已删除：它改成了模型级「思考强度」列。
+    expect(
+      screen.queryByLabelText("deepseekHarness.reasoningEffort"),
+    ).not.toBeInTheDocument();
   });
 
   it("shows credential ref and API format for custom providers", () => {
@@ -117,6 +113,18 @@ describe("DeepSeekHarnessFormFields", () => {
     expect(row?.childElementCount).toBe(5);
     expect(row).toContainElement(screen.getByLabelText("Context Window"));
     expect(row).toContainElement(screen.getByLabelText("Reasoning"));
+  });
+
+  it("official route drops the reasoning column and keeps four cells", () => {
+    renderFields({ isOfficial: true, category: "official" });
+
+    const row = screen
+      .getByPlaceholderText("Model ID")
+      .closest('[class*="md:grid-cols-"]');
+    expect(row).not.toBeNull();
+    // 官方 llm-deepseek 的 models schema 没有 reasoningEfforts。
+    expect(row?.childElementCount).toBe(4);
+    expect(screen.queryByLabelText("Reasoning")).not.toBeInTheDocument();
   });
 
   it("hides credential ref and API format for official providers", () => {

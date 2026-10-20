@@ -1275,8 +1275,9 @@
     "defaultModelBackgroundHint": "該供應商不是 DSH 目前使用的路由，預設模型修改不會生效。",
     "displayName": "顯示名稱",
     "displayNameHint": "側欄與供應商卡片上顯示的名稱",
-    "reasoningEffort": "思考等級",
-    "reasoningEffortHint": "寫入 DSH 設定的 reasoningEffort（留空則不寫）",
+    "reasoningInvalid": "無法儲存：模型「{{model}}」的推理等級無效（{{reason}}）。",
+    "reasoningEffortRemoved": "已移除舊版供應商層級「思考等級」（reasoningEffort）：DSH 原生 pi-ai 路由沒有這個欄位，思考檔位請在模型列裡按模型宣告。",
+    "unnamedModel": "未命名模型",
     "maxTokens": "最大輸出 Tokens",
     "maxTokensHint": "寫入 DSH 設定的 maxTokens（留空則不寫）"
   },
@@ -5076,14 +5077,16 @@
     "label": "推理等級",
     "notSet": "未設定",
     "disabled": "已停用",
-    "chipWire": "傳送值：{{wire}}",
-    "chipSilent": "不傳送思考參數",
-    "noParam": "不傳送",
-    "keepOne": "至少要保留一個等級",
-    "applyPreset": "推薦預設 · {{family}}",
-    "recommended": "{{family}} 預設",
-    "clear": "清除推理等級",
-    "forcedOff": "已強制關閉思考",
-    "adaptive": "已開啟自適應思考"
+    "needsLevelShort": "待設定",
+    "inheritHint": "未宣告推理等級時，DSH 會依模型目錄的能力自動判斷。",
+    "help": "推理等級按模型宣告：每個檔位對應一個寫入請求的 API 參數值。Off 表示關閉思考；設定中已寫入的值會保留並傳送。",
+    "level": "檔位",
+    "value": "API 參數值",
+    "offPlaceholder": "關閉思考",
+    "addLevel": "新增檔位",
+    "removeLevel": "刪除檔位",
+    "needsLevel": "至少新增一個 Off 以外的檔位；不需要思考請關閉推理等級。",
+    "valueRequired": "檔位「{{level}}」的 API 參數值不能為空。",
+    "unknownLevel": "檔位「{{level}}」不是 DSH 支援的推理等級。"
   }
 }

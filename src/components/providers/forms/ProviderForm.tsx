@@ -141,6 +141,7 @@ import {
 import { HERMES_DEFAULT_CONFIG } from "./hooks/useHermesFormState";
 import {
   DSH_CUSTOM_DEFAULT_CONFIG,
+  findDshReasoningIssueInConfig,
   isValidCredentialRef,
   pruneDshModelRows,
 } from "./helpers/deepseekHarnessFormUtils";
@@ -1886,6 +1887,50 @@ function ProviderFormFull({
           string,
           unknown
         >;
+        // 模型级「思考强度」是硬校验：写坏的档位表落盘后 DSH 会拒绝读配置，
+        // 所以发现问题直接拦住保存，不走「仍要保存」的软提示。
+        // 只校验最终要落盘的 JSON：模型行编辑也会实时写回这里，而手工编辑
+        // JSON 不会反向同步 `dshModels`；用后者做前置判断会把已经改好的配置
+        // 误拦。空 ID 行由 helper 跳过，保存时会被 prune。
+        // 官方 llm-deepseek 路由的模型行 schema 没有 `reasoningEfforts`，
+        // 这里不做模型级推理校验；已有值（例如旧插件写下的）只原样透传。
+        const reasoningIssue = dshForm.dshIsOfficial
+          ? undefined
+          : findDshReasoningIssueInConfig(config);
+        if (reasoningIssue) {
+          const { issue } = reasoningIssue;
+          const reason =
+            issue.kind === "needsLevel"
+              ? t("dshReasoning.needsLevel", {
+                  defaultValue:
+                    "Add at least one level other than Off; turn reasoning off if the model should not think.",
+                })
+              : issue.kind === "valueRequired"
+                ? t("dshReasoning.valueRequired", { level: issue.level })
+                : t("dshReasoning.unknownLevel", { level: issue.level });
+          toast.error(
+            t("deepseekHarness.reasoningInvalid", {
+              model:
+                reasoningIssue.modelId || t("deepseekHarness.unnamedModel"),
+              reason,
+            }),
+          );
+          return;
+        }
+        // 旧版的 provider 级 reasoningEffort 属于 pi-ai 插件时代，官方
+        // llm-deepseek 路由自己也声明了这个字段，不能在保存时误删。
+        if (
+          !dshForm.dshIsOfficial &&
+          Object.prototype.hasOwnProperty.call(config, "reasoningEffort")
+        ) {
+          delete config.reasoningEffort;
+          toast.info(
+            t("deepseekHarness.reasoningEffortRemoved", {
+              defaultValue:
+                "Removed the legacy provider-level reasoning effort (reasoningEffort): native DSH pi-ai routes do not have this field. Declare thinking levels per model in the model row.",
+            }),
+          );
+        }
         settingsConfig = JSON.stringify(pruneDshModelRows(config));
       } catch {
         settingsConfig = values.settingsConfig.trim();
@@ -3126,8 +3171,6 @@ function ProviderFormFull({
               isOfficial={dshForm.dshIsOfficial}
               displayName={dshForm.dshDisplayName}
               onDisplayNameChange={dshForm.handleDshDisplayNameChange}
-              reasoningEffort={dshForm.dshReasoningEffort}
-              onReasoningEffortChange={dshForm.handleDshReasoningEffortChange}
               maxTokens={dshForm.dshMaxTokens}
               onMaxTokensChange={dshForm.handleDshMaxTokensChange}
               apiKey={dshForm.dshApiKey}
@@ -3248,9 +3291,6 @@ function ProviderFormFull({
                   placeholder={JSON.stringify(
                     {
                       displayName: dshForm.dshDisplayName,
-                      ...(dshForm.dshReasoningEffort.trim()
-                        ? { reasoningEffort: dshForm.dshReasoningEffort.trim() }
-                        : {}),
                       ...(dshForm.dshMaxTokens
                         ? { maxTokens: Number(dshForm.dshMaxTokens) }
                         : {}),

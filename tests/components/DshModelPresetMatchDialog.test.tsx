@@ -34,12 +34,12 @@ const otherPreset: ModelPreset = {
   id: "p-other",
   name: "Other 预设",
   modelId: "gpt-*",
-  reasoningEffort: "max",
+  temperature: 0.6,
 };
 
 function setupPresets(
   presets: ModelPreset[] = [exactPreset, wildcardPreset, otherPreset],
-  generic: Record<string, unknown> = { reasoningEffort: "high" },
+  generic: Record<string, unknown> = { temperature: 0.4 },
 ) {
   getMock.mockResolvedValue({ presets, generic });
 }
@@ -138,21 +138,21 @@ describe("DshModelPresetMatchDialog", () => {
     const next = onApply.mock.calls[0][0] as DshModel[];
     expect(next).toHaveLength(3);
 
-    // 行 1：套用 Other 预设（reasoningEffort: max），id/name/rowKey/原有字段保留。
+    // 行 1：套用 Other 预设（temperature: 0.6），id/name/rowKey/原有字段保留。
     expect(next[0]).toMatchObject({
       rowKey: "r1",
       id: "deepseek-v4-pro",
       name: "Pro",
       contextWindow: 1000,
-      reasoningEffort: "max",
+      temperature: 0.6,
     });
 
-    // 行 2：套用通用参数，只叠加 reasoningEffort，原字段不动。
+    // 行 2：套用通用参数，只叠加 temperature，原字段不动。
     expect(next[1]).toMatchObject({
       rowKey: "r2",
       id: "deepseek-v4-lite",
       contextWindow: 2000,
-      reasoningEffort: "high",
+      temperature: 0.4,
     });
 
     // 行 3：未匹配，原样返回。

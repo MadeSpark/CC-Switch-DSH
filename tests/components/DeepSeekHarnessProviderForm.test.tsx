@@ -110,9 +110,6 @@ describe("DeepSeek Harness provider form (shared shell)", () => {
     fireEvent.change(screen.getByLabelText("deepseekHarness.displayName"), {
       target: { value: "Company Gateway" },
     });
-    fireEvent.change(screen.getByLabelText("deepseekHarness.reasoningEffort"), {
-      target: { value: "high" },
-    });
     fireEvent.change(screen.getByLabelText("deepseekHarness.maxTokens"), {
       target: { value: "64000" },
     });
@@ -141,9 +138,9 @@ describe("DeepSeek Harness provider form (shared shell)", () => {
     expect(values.meta?.providerType).toBe("dsh_pi_ai");
     expect(values.meta?.dshCurrentModel).toBe("glm-5.3");
     expect(values.name).toBe("Company Gateway");
-    expect(JSON.parse(values.settingsConfig)).toMatchObject({
+    const settings = JSON.parse(values.settingsConfig);
+    expect(settings).toMatchObject({
       displayName: "Company Gateway",
-      reasoningEffort: "high",
       maxTokens: 64000,
       api: "openai-completions",
       baseURL: "https://gateway.example/v1",
@@ -151,6 +148,8 @@ describe("DeepSeek Harness provider form (shared shell)", () => {
       apiKey: "secret",
       models: [{ id: "glm-5.3" }],
     });
+    // 旧的 provider 级推理字段已删除，保存时不再写回。
+    expect(settings).not.toHaveProperty("reasoningEffort");
   });
 
   it("defaults to the custom preset without highlighting a preset in add mode", () => {
@@ -206,6 +205,7 @@ describe("DeepSeek Harness provider form (shared shell)", () => {
           baseURL: "https://company.example/v1",
           apiKeyEnv: "COMPANY_API_KEY",
           apiKey: "secret",
+          // 旧版 provider 级推理字段：仍能打开配置，但不再有对应输入框。
           reasoningEffort: "medium",
           maxTokens: 32000,
           models: [{ id: "deepseek-v4-pro", name: "DeepSeek V4 Pro" }],
@@ -226,8 +226,8 @@ describe("DeepSeek Harness provider form (shared shell)", () => {
       "Company Gateway",
     );
     expect(
-      screen.getByLabelText("deepseekHarness.reasoningEffort"),
-    ).toHaveValue("medium");
+      screen.queryByLabelText("deepseekHarness.reasoningEffort"),
+    ).not.toBeInTheDocument();
     expect(screen.getByLabelText("deepseekHarness.maxTokens")).toHaveValue(
       32000,
     );

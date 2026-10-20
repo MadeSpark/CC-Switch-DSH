@@ -4791,8 +4791,9 @@
   "deepseekHarness": {
     "displayName": "Görünen ad",
     "displayNameHint": "Kenar çubuğunda ve sağlayıcı kartında gösterilen ad",
-    "reasoningEffort": "Düşünme düzeyi",
-    "reasoningEffortHint": "DSH yapılandırmasına yazılan reasoningEffort (boş bırakılırsa yazılmaz)",
+    "reasoningInvalid": "Kaydedilemiyor: “{{model}}” modelinin akıl yürütme düzeyleri geçersiz ({{reason}}).",
+    "reasoningEffortRemoved": "Eski sağlayıcı düzeyi “akıl yürütme düzeyi” (reasoningEffort) kaldırıldı: yerel DSH pi-ai yollarında bu alan yok. Düşünme düzeylerini model satırında model başına bildirin.",
+    "unnamedModel": "Adsız model",
     "maxTokens": "Maksimum çıktı token'ı",
     "maxTokensHint": "DSH yapılandırmasına yazılan maxTokens (boş bırakılırsa yazılmaz)"
   },
@@ -4960,17 +4961,19 @@
     "direct": "Doğrudan"
   },
   "dshReasoning": {
-    "label": "Akıl yürütme",
+    "label": "Akıl yürütme düzeyi",
     "notSet": "Ayarlanmadı",
     "disabled": "Kapalı",
-    "chipWire": "Gönderilen: {{wire}}",
-    "chipSilent": "Akıl yürütme parametresi gönderilmez",
-    "noParam": "Gönderilmez",
-    "keepOne": "En az bir düzey açık kalmalı",
-    "applyPreset": "Önerilen ön ayar · {{family}}",
-    "recommended": "{{family}} ön ayarı",
-    "clear": "Akıl yürütme düzeylerini temizle",
-    "forcedOff": "Akıl yürütme kapatıldı",
-    "adaptive": "Uyarlanabilir düşünme açık"
+    "needsLevelShort": "Yapılandırılmalı",
+    "inheritHint": "Akıl yürütme düzeyi bildirilmezse DSH, model kataloğundaki yeteneklere göre otomatik karar verir.",
+    "help": "Akıl yürütme düzeyleri model başına bildirilir: her düzey, istekle gönderilen bir API parametre değerine karşılık gelir. Off düşünmeyi kapatır; yapılandırmada zaten yazılı olan değerler korunur ve gönderilir.",
+    "level": "Düzey",
+    "value": "API parametre değeri",
+    "offPlaceholder": "Düşünme kapalı",
+    "addLevel": "Düzey ekle",
+    "removeLevel": "Düzeyi sil",
+    "needsLevel": "Off dışında en az bir düzey ekleyin; düşünme gerekmiyorsa akıl yürütmeyi kapatın.",
+    "valueRequired": "“{{level}}” düzeyinin API parametre değeri boş olamaz.",
+    "unknownLevel": "“{{level}}” düzeyi DSH'nin desteklediği bir akıl yürütme düzeyi değil."
   }
 }

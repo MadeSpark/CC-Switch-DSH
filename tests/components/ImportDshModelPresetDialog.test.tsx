@@ -189,7 +189,9 @@ describe("ImportDshModelPresetDialog", () => {
     expect(within(proRow).getByText("low, high")).toBeInTheDocument();
     const liteRow = getModelRow(dialog, "deepseek-v4-lite");
     expect(within(liteRow).getByText("64000")).toBeInTheDocument();
-    expect(within(liteRow).getByText("medium")).toBeInTheDocument();
+    // 旧插件在模型行写的 `reasoningEffort: "medium"` 不是原生字段，
+    // 不能当成当前档位展示；原生只认 `reasoningEfforts`。
+    expect(within(liteRow).getByText("未设置")).toBeInTheDocument();
     expect(within(dialog).getByText("共 3 个可导入")).toBeInTheDocument();
   });
 
@@ -215,7 +217,6 @@ describe("ImportDshModelPresetDialog", () => {
       modelId: "deepseek-v4-pro",
       contextWindow: 128000,
       maxOutputTokens: 8192,
-      reasoningEffort: "high",
       temperature: 0.3,
       extraParams: {
         reasoningEfforts: { low: "low", high: "high" },
@@ -228,7 +229,6 @@ describe("ImportDshModelPresetDialog", () => {
       name: "DeepSeek V4 Lite",
       modelId: "deepseek-v4-lite",
       contextWindow: 64000,
-      reasoningEffort: "medium",
     });
     expect(payload.presets[0].id).not.toBe(payload.presets[1].id);
 
@@ -380,7 +380,7 @@ describe("ImportDshModelPresetDialog", () => {
             {
               id: "reasoning-single",
               name: "单档推理",
-              reasoningEffort: "max",
+              reasoningEfforts: { max: "max" },
             },
             { id: "reasoning-none", name: "无推理设置" },
           ],

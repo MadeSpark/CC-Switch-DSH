@@ -1274,8 +1274,9 @@
     "defaultModelBackgroundHint": "このプロバイダーは DSH の現在のルートではないため、デフォルトモデルの変更は適用されません。",
     "displayName": "表示名",
     "displayNameHint": "サイドバーとプロバイダーカードに表示する名前",
-    "reasoningEffort": "推論レベル",
-    "reasoningEffortHint": "DSH 設定に書き込む reasoningEffort（空欄なら省略）",
+    "reasoningInvalid": "保存できません：モデル「{{model}}」の推論レベルが無効です（{{reason}}）。",
+    "reasoningEffortRemoved": "旧バージョンのプロバイダーレベル「推論レベル」（reasoningEffort）を削除しました：DSH ネイティブの pi-ai ルートにはこのフィールドがありません。推論レベルはモデル行でモデルごとに宣言してください。",
+    "unnamedModel": "名称未設定のモデル",
     "maxTokens": "最大出力トークン",
     "maxTokensHint": "DSH 設定に書き込む maxTokens（空欄なら省略）"
   },
@@ -5075,14 +5076,16 @@
     "label": "推論レベル",
     "notSet": "未設定",
     "disabled": "無効",
-    "chipWire": "送信値：{{wire}}",
-    "chipSilent": "思考パラメータを送信しません",
-    "noParam": "送信しません",
-    "keepOne": "少なくとも 1 つのレベルを残してください",
-    "applyPreset": "推奨プリセット · {{family}}",
-    "recommended": "{{family}} プリセット",
-    "clear": "推論レベルをクリア",
-    "forcedOff": "思考は無効化されています",
-    "adaptive": "適応思考オン"
+    "needsLevelShort": "要設定",
+    "inheritHint": "推論レベルを宣言しない場合、DSH はモデルカタログの能力から自動的に判断します。",
+    "help": "推論レベルはモデルごとに宣言します。各レベルはリクエストに書き込む API パラメーター値に対応します。Off は思考をオフにします。設定にすでに書き込まれている値は保持され、そのまま送信されます。",
+    "level": "レベル",
+    "value": "API パラメーター値",
+    "offPlaceholder": "思考オフ",
+    "addLevel": "レベルを追加",
+    "removeLevel": "レベルを削除",
+    "needsLevel": "Off 以外のレベルを少なくとも 1 つ追加してください。思考が不要な場合は推論レベルをオフにしてください。",
+    "valueRequired": "レベル「{{level}}」の API パラメーター値は空にできません。",
+    "unknownLevel": "レベル「{{level}}」は DSH が対応する推論レベルではありません。"
   }
 }

@@ -23,10 +23,14 @@ export type DshModel = {
   /** 模型支持的输入模态（如 `["text", "image"]`）；表单只原样透传，不做编辑。 */
   input?: unknown;
   /**
-   * 模型声明的思考等级表。`false` 是插件的哨兵值，表示「强制关闭思考」，
+   * 模型声明的思考等级表。`false` 是原生哨兵值，表示「该模型不提供思考参数」，
    * 与「未设置」（省略该字段）语义不同，必须原样保留。
+   *
+   * 类型故意放宽成 `unknown`：表单不是修复器，落盘里的 `null`、数组、数字等
+   * 非法值也要原样带回去，交给保存前的硬校验显式拦下。加载时丢掉坏值会让
+   * 「打开表单再保存」把非法配置静默洗白（审计 T5 第 2 点）。
    */
-  reasoningEfforts?: DshReasoningEfforts | false;
+  reasoningEfforts?: unknown;
   /** 传输层兼容开关（如 `forceAdaptiveThinking`）；原样透传。 */
   compat?: Record<string, unknown>;
   /** Client-only stable React key; stripped before persisting. */
@@ -136,6 +140,24 @@ export function isDshOfficial(
 }
 
 /**
+ * 深拷贝配置值。模型行会整表写回，嵌套对象若是同一引用，表单里的一次修改
+ * 可能反向污染原始 `settingsConfig`；这里只复制普通对象 / 数组，其余标量按
+ * 原值返回（包括 `undefined`，由调用方决定是否省略字段）。
+ */
+function cloneDshConfigValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(cloneDshConfigValue);
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [
+        key,
+        cloneDshConfigValue(item),
+      ]),
+    );
+  }
+  return value;
+}
+
+/**
  * Safely parses a DSH model catalog, tolerating `{ id }` objects and bare
  * id strings from imported native configuration.
  */
@@ -174,13 +196,13 @@ export function normalizeDshModels(value: unknown): DshModel[] {
         delete model.contextWindow;
       }
 
-      const reasoningEfforts = normalizeDshReasoningEfforts(
-        item.reasoningEfforts,
-      );
-      if (reasoningEfforts === undefined) {
+      // 原生字段原样深拷贝，包括 `{}`、`null`、`true`、数组和非法 wire。
+      // 这里禁止任何「顺手修复」：否则保存前的原生格式硬校验会被绕过，
+      // 而且一次模型行编辑就会把非法值洗成合法值（审计 T5）。
+      if (item.reasoningEfforts === undefined) {
         delete model.reasoningEfforts;
       } else {
-        model.reasoningEfforts = reasoningEfforts;
+        model.reasoningEfforts = cloneDshConfigValue(item.reasoningEfforts);
       }
 
       models.push(model);
@@ -189,18 +211,19 @@ export function normalizeDshModels(value: unknown): DshModel[] {
   return models;
 }
 
-// ── 推理等级（reasoningEfforts）─────────────────────────────────────
+// ── 推理等级（reasoningEfforts）──────────────────────────────────────
 //
-// 下面这段等级表、模型族推荐值和落盘规则逐行照抄 DSH 桌面插件
-// `dsh-desktop-ui-reasoning-effort@0.1.2` 的 `lib/client.js` L108-222
-// （`effortsOf` / `preset` / `atLeast` / `normalizeModelId` / `presetFor`），
-// 保证 CC Switch 里配出来的 `reasoningEfforts` 和 `compat.forceAdaptiveThinking`
-// 跟插件面板里配出来的逐键一致：等级由弱到强、值是发给 pi-ai 的字面值、
-// `null` 表示不发送思考参数、字段未设置时整段省略（绝不写成 `{}`）。
-// 不认识或非推理模型一律返回 null，不再按前缀瞎猜。
-// 契约镜像测试：`tests/components/dshReasoningPresetMirror.test.ts`。
+// 逐条对齐 DSH 44.7 原生 schema 与设置页：
+// - `dsh-llm-pi-ai/lib/index.js:1033` 字段定义、`:585-597` 校验；
+// - `dsh-client-ui-settings-models/lib/client.js:265-369` 读取/写回/编辑器。
+//
+// 推理等级是**模型级**字段，只有三种合法形态：字段缺省（继承目录能力）、
+// `false`（声明该模型非推理模型）、非空对象（精确声明可用档位）。档位固定
+// 七档、由弱到强；值是该档位写进请求的 API 参数值，`null` 只允许给 `off`。
+// 读取一律保序、保未知键：空串 / 非法 null / 非七档的键都留在表单里由校验
+// 标错并在保存时拦截，绝不静默丢弃。
 
-/** 思考等级，由弱到强（与插件的 LEVELS 顺序一致）。 */
+/** 档位，由弱到强（原生 `THINKING_LEVELS`，顺序不能动）。 */
 export const DSH_REASONING_LEVELS = [
   "off",
   "minimal",
@@ -211,265 +234,242 @@ export const DSH_REASONING_LEVELS = [
   "max",
 ] as const;
 
+/** 打开开关时播种的原生初始档位（`INITIAL_LEVELS`）。 */
+export const DSH_REASONING_INITIAL_LEVELS = [
+  "off",
+  "low",
+  "medium",
+  "high",
+] as const;
+
 export type DshReasoningLevel = (typeof DSH_REASONING_LEVELS)[number];
 
-/** 某个模型族的推荐等级表；`adaptive` 表示要同时开自适应思考。 */
-export interface DshReasoningPreset {
-  family: string;
-  efforts: DshReasoningEfforts;
-  adaptive: boolean;
-}
+/**
+ * 有序的等级表条目（保留落盘顺序，含七档之外的未知键）。
+ *
+ * 值故意放宽为 `unknown`：原生 `readEfforts`（`client.js:291-296`）只按
+ * `Object.entries` 原样读出，数字、布尔、`undefined` 都保留并交给校验标错；
+ * 这里若过滤掉坏值，界面会少一行、用户也无从修复。
+ */
+export type DshReasoningEntries = Array<[string, unknown]>;
 
-function hasOwn(value: object, key: string): boolean {
-  return Object.prototype.hasOwnProperty.call(value, key);
+/** 原生校验错误：值缺失 / 缺少非 off 档位 / 档位不属于七档。 */
+export type DshReasoningIssue =
+  | { kind: "valueRequired"; level: string }
+  | { kind: "needsLevel" }
+  | { kind: "unknownLevel"; level: string };
+
+export interface DshReasoningIssueLocation {
+  modelId: string;
+  issue: DshReasoningIssue;
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-/** 把面板里的短写法（`"off=none,low"`）解析成等级表。 */
-function effortsOf(spec: string): DshReasoningEfforts {
-  const efforts: DshReasoningEfforts = {};
-  for (const part of spec.split(",")) {
-    const token = part.trim();
-    if (token === "") continue;
-    const [level, wire] = token.split("=");
-    const key = level.trim();
-    if (key === "") continue;
-    efforts[key] =
-      wire === undefined ? (key === "off" ? null : key) : wire.trim();
-  }
-  return efforts;
-}
-
-/** 插件 `preset(family, spec, adaptive)`：`adaptive` 只有显式 true 才算。 */
-function preset(
-  family: string,
-  spec: string,
-  adaptive = false,
-): DshReasoningPreset {
-  return { family, efforts: effortsOf(spec), adaptive: adaptive === true };
-}
-
-/** `[major, minor]` 至少到 `[a, b]`（插件 `atLeast`，纯数字比较）。 */
-function atLeast(major: number, minor: number, a: number, b: number): boolean {
-  return major > a || (major === a && minor >= b);
-}
-
-/** 归一化模型 id（逐行照抄插件 `normalizeModelId`，顺序不能动）。 */
-export function normalizeDshModelId(modelId: string): string {
-  let id = String(modelId).trim().toLowerCase();
-  id = id.slice(id.lastIndexOf("/") + 1);
-  id = id.replace(/[:@].*$/, "");
-  let previous = "";
-  do {
-    previous = id;
-    id = id.replace(
-      /-(?:thinking|nothinking|openai-compact|compact|preview|exp|\d{8}|\d{4}-\d{2}-\d{2})$/,
-      "",
-    );
-  } while (id !== previous);
-  // claude-opus-4.7 → claude-opus-4-7
-  id = id.replace(
-    /^claude-(opus|sonnet|haiku|fable)-(\d+)\.(\d+)/,
-    "claude-$1-$2-$3",
-  );
-  // grok-4-6 → grok-4.6 / glm-5-2 → glm-5.2
-  id = id.replace(/^(grok|glm)-(\d+)-(\d+)(?=-|$)/, "$1-$2.$3");
-  id = id.replace(/^claude-3\.7-/, "claude-3-7-");
-  return id;
-}
-
-/** 按模型 id 取推荐等级表（逐行照抄插件 `presetFor`）；不认识返回 null。 */
-export function dshReasoningPresetFor(
-  modelId: string,
-): DshReasoningPreset | null {
-  const normalized = normalizeDshModelId(modelId);
-
-  // GPT / OpenAI：gpt-5 起才有思考等级；5.0/5.1/5.2/5.6 与 6.x 各自不同。
-  const gpt = /^gpt-(\d+)(?:\.(\d+))?(.*)$/.exec(normalized);
-  if (gpt !== null) {
-    const major = Number(gpt[1]);
-    const minor = gpt[2] === undefined ? 0 : Number(gpt[2]);
-    const rest = gpt[3];
-    const at = (a: number, b: number) => atLeast(major, minor, a, b);
-    if (!at(5, 0)) return null;
-    if (/^-chat(?:-|$)/.test(rest)) {
-      return major === 5 && minor === 2 ? preset("GPT", "medium,xhigh") : null;
-    }
-    if (/-pro(?:-|$)/.test(rest)) {
-      return preset("GPT", at(5, 2) ? "medium,high,xhigh" : "high");
-    }
-    if (/-codex-spark(?:-|$)/.test(rest)) {
-      return preset("GPT", "low,medium,high,xhigh");
-    }
-    if (at(6, 0)) {
-      return preset(
-        "GPT",
-        /astra/.test(rest)
-          ? "low,medium,high,xhigh,max"
-          : "off=none,low,medium,high,xhigh,max",
-      );
-    }
-    if (at(5, 6)) {
-      return preset("GPT", "off=none,low,medium,high,xhigh,max");
-    }
-    if (at(5, 2)) return preset("GPT", "off=none,low,medium,high,xhigh");
-    if (at(5, 1)) return preset("GPT", "off=none,low,medium,high");
-    return preset("GPT", "minimal,low,medium,high");
-  }
-
-  if (/^gpt-oss(?:-|$)/.test(normalized)) {
-    return preset("GPT", "low,medium,high");
-  }
-  if (/^o[134](?:-|$)/.test(normalized)) {
-    return preset("OpenAI o", "low,medium,high");
-  }
-
-  // Claude：fable / opus 5+ 用 5 档且强制自适应；4.6 / 4.7 才带 off 与 max。
-  const claude =
-    /^claude-(opus|sonnet|haiku|fable)-(\d+)(?:-(\d{1,2}))?(?:-|$)/.exec(
-      normalized,
-    );
-  if (claude !== null) {
-    const tier = claude[1];
-    const major = Number(claude[2]);
-    const minor = claude[3] === undefined ? 0 : Number(claude[3]);
-    const at = (a: number, b: number) => atLeast(major, minor, a, b);
-    if (tier === "fable" || (tier === "opus" && at(5, 0))) {
-      return preset("Claude", "low,medium,high,xhigh,max", true);
-    }
-    if (at(4, 7)) {
-      return preset("Claude", "off,low,medium,high,xhigh,max", true);
-    }
-    if (at(4, 6)) return preset("Claude", "off,low,medium,high,max", true);
-    if (at(4, 0) && (tier !== "haiku" || at(4, 5))) {
-      return preset("Claude", "off,low,medium,high");
-    }
-    return null;
-  }
-  if (/^claude-3-7-sonnet(?:-|$)/.test(normalized)) {
-    return preset("Claude", "off,low,medium,high");
-  }
-
-  // Grok：4.1 起才有等级；fast/mini/reasoning 变体只给 low/high。
-  const grok = /^grok-(\d+)(?:\.(\d+))?(.*)$/.exec(normalized);
-  if (grok !== null) {
-    const major = Number(grok[1]);
-    const minor = grok[2] === undefined ? 0 : Number(grok[2]);
-    const rest = grok[3];
-    const at = (a: number, b: number) => atLeast(major, minor, a, b);
-    if (at(4, 1) && !at(4, 3) && /(?:fast|mini|reasoning)/.test(rest)) {
-      return preset("Grok", "low,high");
-    }
-    if (at(4, 6)) return preset("Grok", "low,medium,high,xhigh");
-    if (at(4, 5)) return preset("Grok", "low,medium,high");
-    if (at(4, 3)) return preset("Grok", "off=none,low,medium,high");
-    if (at(4, 1)) return preset("Grok", "low,medium,high");
-    if (major === 3 && /mini/.test(rest)) return preset("Grok", "low,high");
-    return null;
-  }
-
-  const glm = /^glm-(\d+)(?:\.(\d+))?/.exec(normalized);
-  if (glm !== null) {
-    const major = Number(glm[1]);
-    const minor = glm[2] === undefined ? 0 : Number(glm[2]);
-    const at = (a: number, b: number) => atLeast(major, minor, a, b);
-    if (at(5, 3)) return preset("GLM", "low,high,max");
-    if (at(5, 2)) return preset("GLM", "off=none,high,max");
-    if (at(4, 5)) return preset("GLM", "off,minimal,low,medium,high");
-    return null;
-  }
-
-  const mimo = /^(?:xiaomi-)?mimo-v(\d+)(?:\.(\d+))?/.exec(normalized);
-  if (mimo !== null) {
-    const major = Number(mimo[1]);
-    const minor = mimo[2] === undefined ? 0 : Number(mimo[2]);
-    return atLeast(major, minor, 2, 5)
-      ? preset("MiMo", "off,minimal,low,medium,high")
-      : null;
-  }
-
-  return null;
-}
-
-/** 自定义模式下的默认等级表（与插件一致）。 */
-export const DEFAULT_DSH_CUSTOM_EFFORTS: DshReasoningEfforts = effortsOf(
-  "off,low,medium,high",
-);
-
-/** 值是不是一张合法的等级表（`false` 哨兵值不算）。 */
-export function isDshReasoningEfforts(
-  value: unknown,
-): value is DshReasoningEfforts {
-  if (!isPlainObject(value)) return false;
-  const entries = Object.entries(value);
-  if (entries.length === 0) return false;
-  return entries.every(
-    ([key, wire]) =>
-      key.trim() !== "" &&
-      (wire === null || (typeof wire === "string" && wire.trim() !== "")),
-  );
+function isDshReasoningLevelName(level: string): boolean {
+  return (DSH_REASONING_LEVELS as readonly string[]).includes(level);
 }
 
 /**
- * 校验并规范化落盘的 `reasoningEfforts`：值只能是字符串或 `null`，
- * 键按等级从弱到强排序，空表 → `undefined`（调用方应当省略整个字段）。
- * `false` 哨兵值原样保留。
+ * 兼容读取落盘的 `reasoningEfforts`：`false` / `null` / 非对象 / 数组 一律
+ * 视为「没有等级表」（返回 `undefined`）；普通对象按键顺序原样返回，未知键
+ * 和任何值类型都保留（原生 `client.js:291-296` 同样不过滤），由
+ * `dshReasoningIssue` 标错并在保存时拦截。
  */
-export function normalizeDshReasoningEfforts(
+export function readDshReasoningEntries(
   value: unknown,
-): DshReasoningEfforts | false | undefined {
-  if (value === false) return false;
+): DshReasoningEntries | undefined {
   if (!isPlainObject(value)) return undefined;
-
-  const next: DshReasoningEfforts = {};
-  for (const level of DSH_REASONING_LEVELS) {
-    if (!hasOwn(value, level)) continue;
-    const wire = value[level];
-    if (wire === null) next[level] = null;
-    else if (typeof wire === "string" && wire.trim() !== "") {
-      next[level] = wire.trim();
-    }
-  }
-  // 等级表之外的键（网关自定义的等级名）也要保住，否则保存一次就没了。
-  for (const [key, wire] of Object.entries(value)) {
-    if ((DSH_REASONING_LEVELS as readonly string[]).includes(key)) continue;
-    if (wire === null) next[key] = null;
-    else if (typeof wire === "string" && wire.trim() !== "") {
-      next[key] = wire.trim();
-    }
-  }
-
-  return Object.keys(next).length > 0 ? next : undefined;
+  return Object.entries(value);
 }
 
-/** 按等级顺序重排一张等级表（不丢键）。 */
-export function orderDshReasoningEfforts(
-  value: DshReasoningEfforts,
-): DshReasoningEfforts {
-  const ordered: DshReasoningEfforts = {};
-  for (const level of DSH_REASONING_LEVELS) {
-    if (hasOwn(value, level)) ordered[level] = value[level];
-  }
-  for (const [key, wire] of Object.entries(value)) {
-    if (!hasOwn(ordered, key)) ordered[key] = wire;
-  }
-  return ordered;
+/** 档位默认 API 参数值：`off` → `null`，其余 → 档位名本身。 */
+export function dshReasoningDefaultValue(level: string): string | null {
+  return level === "off" ? null : level;
 }
 
-/** 两张等级表是否等价（键集合和值都一致）。 */
-export function dshReasoningEffortsEqual(
-  left: DshReasoningEfforts | undefined,
-  right: DshReasoningEfforts | undefined,
-): boolean {
-  if (!left || !right) return left === right;
-  const leftKeys = Object.keys(left);
-  if (leftKeys.length !== Object.keys(right).length) return false;
-  return leftKeys.every(
-    (key) => hasOwn(right, key) && left[key] === right[key],
-  );
+/** 开关打开时的原生初始表：`off: null, low, medium, high`。 */
+export function dshReasoningInitialEntries(): DshReasoningEntries {
+  return DSH_REASONING_INITIAL_LEVELS.map((level) => [
+    level,
+    dshReasoningDefaultValue(level),
+  ]);
+}
+
+/**
+ * 「添加档位」：优先取高于当前最高已用档位的第一个未用档位，否则取第一个
+ * 未用档位（原生 `:351-357`）。七档用完时返回 `undefined`。
+ */
+export function dshReasoningNextLevel(
+  used: readonly string[],
+): string | undefined {
+  const usedSet = new Set(used);
+  const levels = DSH_REASONING_LEVELS as readonly string[];
+  let highest = -1;
+  for (const level of used) {
+    const position = levels.indexOf(level);
+    if (position > highest) highest = position;
+  }
+  for (let index = highest + 1; index < levels.length; index += 1) {
+    if (!usedSet.has(levels[index])) return levels[index];
+  }
+  for (const level of levels) {
+    if (!usedSet.has(level)) return level;
+  }
+  return undefined;
+}
+
+/**
+ * 档位下拉选项，照抄原生 `client.js:370` 的 `choicesFor`：
+ * `[...(levels.includes(current) ? [] : [current]), ...levels.filter(
+ * choice => choice === current || !used.includes(choice))]`。
+ *
+ * 也就是说：当前值属于七档时按七档规范顺序排列（当前档位留在它原本的位置，
+ * 不置顶）；只有当前值是七档之外的未知键（或空串）时，才把它放在最前面，
+ * 保证不被静默改掉。签名里 `current` 是这一行的档位，`used` 是整张等级表的
+ * 档位列表（含 `current` 自己）。
+ */
+export function dshReasoningLevelChoices(
+  current: string,
+  used: readonly string[],
+): string[] {
+  const canonical = DSH_REASONING_LEVELS as readonly string[];
+  const choices: string[] = canonical.includes(current) ? [] : [current];
+  for (const level of canonical) {
+    if (level === current || !used.includes(level)) choices.push(level);
+  }
+  return choices;
+}
+
+/**
+ * 换档：旧值是自定义参数值（字符串非空、不等于旧档位名）且新旧档位都不是
+ * `off` 时保留，否则换成新档位的默认值（原生 `:348-350`）。
+ *
+ * 注意原生判空用 `wire.length > 0` 而不是 `trim()`：纯空白虽然不是合法 wire
+ * （失焦时会被 `leaveValue` 复位），但换档本身不该顺手改写它。
+ */
+export function dshReasoningWithLevel(
+  entries: ReadonlyArray<readonly [string, unknown]>,
+  index: number,
+  nextLevel: string,
+): DshReasoningEntries {
+  const next: DshReasoningEntries = entries.map(([level, wire]) => [
+    level,
+    wire,
+  ]);
+  const entry = next[index];
+  if (!entry) return next;
+  const [level, wire] = entry;
+  const customWire =
+    level !== "off" &&
+    nextLevel !== "off" &&
+    typeof wire === "string" &&
+    wire.length > 0 &&
+    wire !== level
+      ? wire
+      : undefined;
+  next[index] = [nextLevel, customWire ?? dshReasoningDefaultValue(nextLevel)];
+  return next;
+}
+
+/**
+ * 参数值编辑，照抄原生 `client.js:358-364`：
+ * `const trimmed = text.trim(); write(trimmed.length === 0 ? defaultValue(level) : trimmed)`。
+ *
+ * 所以非空输入也会 trim（不会把用户输入的首尾空格写进 API 参数值），空串 /
+ * 纯空白则重置为该档位默认值。
+ */
+export function dshReasoningWithWire(
+  entries: ReadonlyArray<readonly [string, unknown]>,
+  index: number,
+  text: string,
+): DshReasoningEntries {
+  const next: DshReasoningEntries = entries.map(([level, wire]) => [
+    level,
+    wire,
+  ]);
+  const entry = next[index];
+  if (!entry) return next;
+  const trimmed = text.trim();
+  next[index] = [
+    entry[0],
+    trimmed.length === 0 ? dshReasoningDefaultValue(entry[0]) : trimmed,
+  ];
+  return next;
+}
+
+/**
+ * 校验等级表。前两步照抄原生 `dsh-llm-pi-ai/lib/index.js:585-597` 的顺序：
+ * 值是否合法 → 是否至少有一个非 `off` 档位。
+ *
+ * 第三步（未知键报 `unknownLevel`）是 **CCS 比原生更严的策略，不是原生行为**：
+ * 原生 runtime 只遍历七档，七档之外的键直接忽略（`index.js:588-591`），原生 UI
+ * 也会把未知键原样保留、允许继续编辑（`client.js:291-296`）。CCS 为了让无效键
+ * 可见并阻止落盘，选择在这里拦住它；同理 `findDshReasoningIssue*` 会因此在保存
+ * 前报错。改动这里的松紧度前请先确认这是有意的产品决策。
+ */
+export function dshReasoningIssue(
+  value: unknown,
+): DshReasoningIssue | undefined {
+  if (value === undefined || value === false) return undefined;
+  if (!isPlainObject(value)) return { kind: "needsLevel" };
+  const entries = Object.entries(value);
+  if (entries.length === 0) return { kind: "needsLevel" };
+
+  for (const [level, wire] of entries) {
+    const valid =
+      (typeof wire === "string" && wire.trim() !== "") ||
+      (wire === null && level === "off");
+    if (!valid) return { kind: "valueRequired", level };
+  }
+
+  for (const [level] of entries) {
+    if (!isDshReasoningLevelName(level)) return { kind: "unknownLevel", level };
+  }
+
+  if (!entries.some(([level]) => level !== "off"))
+    return { kind: "needsLevel" };
+  return undefined;
+}
+
+/**
+ * 保存巡检只管「会落盘的行」：T2 的保存路径先 `pruneDshModelRows` 再校验，
+ * 空 ID 行会被整行删掉，不能因为空行上残留的非法 `reasoningEfforts` 误拦保存。
+ */
+function hasDshModelId(value: unknown): value is string {
+  return typeof value === "string" && value.trim() !== "";
+}
+
+/** 按模型顺序返回第一个 `reasoningEfforts` 非法的模型（跳过空 ID 行）。 */
+export function findDshReasoningIssue(
+  models: readonly DshModel[],
+): DshReasoningIssueLocation | undefined {
+  for (const model of models) {
+    if (!model || typeof model !== "object") continue;
+    if (!hasDshModelId(model.id)) continue;
+    const issue = dshReasoningIssue(model.reasoningEfforts);
+    if (issue) return { modelId: model.id, issue };
+  }
+  return undefined;
+}
+
+/** 档位参数值在输入框里的只读文本；任何脏值都不能让渲染抛错。 */
+export function formatDshReasoningWire(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (value === null || value === undefined) return "";
+  try {
+    return typeof value === "object"
+      ? (JSON.stringify(value) ?? "")
+      : String(value);
+  } catch {
+    try {
+      return String(value);
+    } catch {
+      return "";
+    }
+  }
 }
 
 /**
@@ -505,34 +505,25 @@ export function formatDshReasoningLevelsLabel(levels: string[]): string {
 }
 
 /**
- * 某等级实际要发的值：优先用推荐值，否则 `off` → `null`，其余等级发等级名本身。
+ * 从原始 settings JSON 值检查 `models[].reasoningEfforts`，不经过
+ * `normalizeDshModels`：这样手工粘贴进来的非法值也能在保存前拦住。
+ * 与 `findDshReasoningIssue` 一样跳过空 ID 行（保存时会被 prune 掉）。
  */
-export function dshReasoningWireFor(
-  level: string,
-  preset: DshReasoningPreset | null,
-): string | null {
-  if (preset && hasOwn(preset.efforts, level)) {
-    return preset.efforts[level];
+export function findDshReasoningIssueInConfig(
+  config: unknown,
+): DshReasoningIssueLocation | undefined {
+  if (!isPlainObject(config)) return undefined;
+  const models = config.models;
+  if (!Array.isArray(models)) return undefined;
+  for (const entry of models) {
+    if (!isPlainObject(entry)) continue;
+    const modelId = entry.id;
+    if (!hasDshModelId(modelId)) continue;
+    const issue = dshReasoningIssue(entry.reasoningEfforts);
+    if (issue) return { modelId, issue };
   }
-  return level === "off" ? null : level;
+  return undefined;
 }
-
-/**
- * 在等级表上加/减一个等级，返回重排后的新表；减空则返回 `undefined`
- * （调用方应当删掉整个字段，而不是写 `{}`）。
- */
-export function toggleDshReasoningLevel(
-  current: DshReasoningEfforts | false | undefined,
-  level: string,
-  preset: DshReasoningPreset | null,
-): DshReasoningEfforts | undefined {
-  const base = isDshReasoningEfforts(current) ? current : {};
-  const next: DshReasoningEfforts = { ...base };
-  if (hasOwn(next, level)) delete next[level];
-  else next[level] = dshReasoningWireFor(level, preset);
-  return normalizeDshReasoningEfforts(next) || undefined;
-}
-
 /** DSH credential reference names must match the backend's env-var pattern. */
 export function isValidCredentialRef(value: string): boolean {
   return /^[A-Z_][A-Z0-9_]*$/.test(value);

@@ -5,8 +5,8 @@ import { CHECKBOX_CLASS, V7Dialog } from "@/components/mcp/formBits";
 import {
   DSH_REASONING_LEVELS,
   formatDshReasoningLevelsLabel,
-  isDshReasoningEfforts,
   normalizeDshModels,
+  readDshReasoningEntries,
   type DshModel,
 } from "@/components/providers/forms/helpers/deepseekHarnessFormUtils";
 import { Button } from "@/components/ui/button";
@@ -271,22 +271,18 @@ export function ImportDshModelPresetDialog({
       if (model.reasoningEfforts === false) {
         return t("dshReasoning.disabled", { defaultValue: "已禁用" });
       }
-      const efforts = model.reasoningEfforts;
-      if (isDshReasoningEfforts(efforts)) {
-        const levels = [
-          ...DSH_REASONING_LEVELS.filter((level) => level in efforts),
-          ...Object.keys(efforts).filter(
-            (level) =>
-              !(DSH_REASONING_LEVELS as readonly string[]).includes(level),
-          ),
-        ];
-        if (levels.length > 0) return formatDshReasoningLevelsLabel(levels);
-      }
-      if (
-        typeof model.reasoningEffort === "string" &&
-        model.reasoningEffort.trim()
-      ) {
-        return model.reasoningEffort.trim();
+      // 原生模型字段只有 `reasoningEfforts`；旧插件在模型行写的
+      // `reasoningEffort` 字符串不是原生字段，不能拿来冒充当前档位。
+      const entries = readDshReasoningEntries(model.reasoningEfforts);
+      if (entries && entries.length > 0) {
+        // 这里只做只读摘要：七档按原生顺序展示，网关自定义键排在后面，
+        // 不回头改写落盘里的键顺序。
+        const levels = entries.map(([level]) => level);
+        const canonical = DSH_REASONING_LEVELS as readonly string[];
+        return formatDshReasoningLevelsLabel([
+          ...canonical.filter((level) => levels.includes(level)),
+          ...levels.filter((level) => !canonical.includes(level)),
+        ]);
       }
       return t("dshReasoning.notSet", { defaultValue: "未设置" });
     },

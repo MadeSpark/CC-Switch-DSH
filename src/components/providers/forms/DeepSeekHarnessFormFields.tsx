@@ -1,11 +1,12 @@
 import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Check, ChevronDown, Plus, Trash2, X } from "lucide-react";
+import { ChevronDown, HelpCircle, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { FormLabel } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { ImeSafeInput } from "@/components/ui/ime-safe-input";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
 import { DshModelPresetMatchDialog } from "@/components/model-presets/DshModelPresetMatchDialog";
 import {
   Popover,
@@ -28,17 +29,21 @@ import {
 } from "@/lib/api/model-fetch";
 import {
   DSH_MODEL_API_OPTIONS,
-  DSH_REASONING_LEVELS,
-  dshReasoningEffortsEqual,
-  dshReasoningPresetFor,
+  dshReasoningDefaultValue,
+  dshReasoningInitialEntries,
+  dshReasoningIssue,
+  dshReasoningLevelChoices,
+  dshReasoningNextLevel,
+  dshReasoningWithLevel,
+  dshReasoningWithWire,
   formatDshReasoningLevelsLabel,
-  isDshReasoningEfforts,
+  formatDshReasoningWire,
   nextDshRowKey,
-  orderDshReasoningEfforts,
-  toggleDshReasoningLevel,
+  readDshReasoningEntries,
   withDshRowKeys,
   type DshModel,
   type DshReasoningEfforts,
+  type DshReasoningEntries,
 } from "./helpers/deepseekHarnessFormUtils";
 import {
   FetchedModelPicker,
@@ -52,62 +57,82 @@ const API_FORMAT_LABELS: Record<string, string> = {
   "anthropic-messages": "Anthropic Messages",
 };
 
+/**
+ * 模型行栅格。两种路由的列数不同：手写 pi-ai 路由多一列「思考强度」，官方
+ * `llm-deepseek` 路由没有这一列。两套任意值都写成字面量常量，Tailwind 才能扫到。
+ */
+const MODEL_GRID_CUSTOM =
+  "md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_140px_minmax(0,1fr)_36px]";
+const MODEL_GRID_OFFICIAL =
+  "md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_140px_36px]";
+
 interface DshReasoningLevelsEditorProps {
-  /** 这一行已存的等级表；`undefined` 表示没设置过（不写这个字段）。 */
-  efforts?: DshReasoningEfforts;
-  /** 最后一个非 off 等级：不能再取消，点了只给提示。 */
-  blockedLevel?: string;
-  /** 推荐预设家族；有值时面板底部给出「使用预设」。 */
-  recommendedFamily?: string;
-  /** 当前等级表已与推荐预设完全一致。 */
-  recommendedApplied?: boolean;
-  /** 这一行显式写了 `reasoningEfforts: false`。 */
-  forcedOff?: boolean;
-  /** 这一行开了 `compat.forceAdaptiveThinking`。 */
-  adaptive?: boolean;
-  /** 有可清除的字段（等级表或 false）时显示清除按钮。 */
-  clearable?: boolean;
-  onToggle: (level: string) => void;
-  onApplyPreset?: () => void;
-  onClear?: () => void;
+  /**
+   * 这一行的原始值：`undefined` 继承目录能力，`false` 声明非推理模型；
+   * 落盘里的非法值（`null`、数组、数字等）也原样传进来，由校验标错。
+   */
+  efforts?: unknown;
+  disabled?: boolean;
+  /** 写回：`undefined` = 删除字段；对象 = 整张等级表。 */
+  onChange: (next: DshReasoningEfforts | undefined) => void;
 }
 
 /**
- * 推理等级控件：与 Codex 表单同一个 Popover 壳（紧凑触发器 + 折叠文案），
- * 面板里是一列 checkbox —— 等级名用英文原文，右侧灰字是真正会落盘的发送值。
- * 打开后不自动关闭，方便连续勾选；数据仍然由调用方的 onToggle 负责持久化。
+ * 模型级「思考强度」控件，照抄 DSH 44.7 原生设置页：
+ * Popover 里一个开关（继承 ⇄ 声明）+ 行编辑器（档位下拉 + API 参数值 + 删除）
+ * + 添加档位。开关关掉 = 删除字段（继承目录能力）；打开则播种
+ * `off/low/medium/high`（`off` 发 `null`，其余发档位名）。
+ * 编辑期允许出现 `{}`、未知档位、空值等中间态，保存前由 `dshReasoningIssue`
+ * 硬拦截，这里只负责把它们标出来。
  */
 function DshReasoningLevelsEditor({
   efforts,
-  blockedLevel,
-  recommendedFamily,
-  recommendedApplied,
-  forcedOff,
-  adaptive,
-  clearable,
-  onToggle,
-  onApplyPreset,
-  onClear,
+  disabled = false,
+  onChange,
 }: DshReasoningLevelsEditorProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
+  // 正在输入的那一行：输入框允许暂时是空串，行数据已经回到档位默认值。
+  const [typing, setTyping] = useState<{ index: number; text: string }>();
 
-  // 已知等级在前（从弱到强），网关自定义的等级名原样接在后面。
-  const selected = efforts
-    ? [
-        ...DSH_REASONING_LEVELS.filter((level) => level in efforts),
-        ...Object.keys(efforts).filter(
-          (level) =>
-            !(DSH_REASONING_LEVELS as readonly string[]).includes(level),
-        ),
-      ]
-    : [];
-  const triggerLabel =
-    selected.length > 0
-      ? formatDshReasoningLevelsLabel(selected)
-      : forcedOff
-        ? t("dshReasoning.disabled", { defaultValue: "Disabled" })
-        : t("dshReasoning.notSet", { defaultValue: "Not set" });
+  const entries = readDshReasoningEntries(efforts);
+  const issue = dshReasoningIssue(efforts);
+  const usedLevels = entries?.map(([level]) => level) ?? [];
+  const nextLevel = dshReasoningNextLevel(usedLevels);
+  const issueIndex =
+    entries && issue && "level" in issue
+      ? entries.findIndex(([level]) => level === issue.level)
+      : -1;
+
+  // 摘要：显式 false → 已关闭；没有字段 → 未设置；非法表 → 缺档位提示。
+  const summary = !entries
+    ? efforts === false
+      ? t("dshReasoning.disabled", { defaultValue: "Disabled" })
+      : t("dshReasoning.notSet", { defaultValue: "Not set" })
+    : issue
+      ? t("dshReasoning.needsLevelShort", { defaultValue: "Needs levels" })
+      : formatDshReasoningLevelsLabel(usedLevels);
+
+  const issueText = !issue
+    ? undefined
+    : issue.kind === "valueRequired"
+      ? t("dshReasoning.valueRequired", {
+          defaultValue: "{{level}} needs a value",
+          level: issue.level,
+        })
+      : issue.kind === "unknownLevel"
+        ? t("dshReasoning.unknownLevel", {
+            defaultValue: "{{level}} is not a native level",
+            level: issue.level,
+          })
+        : t("dshReasoning.needsLevel", {
+            defaultValue: "Keep at least one level other than off",
+          });
+
+  const commit = (next: DshReasoningEntries) => {
+    setTyping(undefined);
+    onChange(Object.fromEntries(next) as DshReasoningEfforts);
+  };
 
   return (
     <Popover modal={false} open={open} onOpenChange={setOpen}>
@@ -115,15 +140,13 @@ function DshReasoningLevelsEditor({
         <button
           type="button"
           aria-label={t("dshReasoning.label", { defaultValue: "Reasoning" })}
-          title={triggerLabel}
+          title={summary}
           className={cn(
             "flex h-8 w-full min-w-0 items-center justify-between gap-1 whitespace-nowrap rounded-md border border-border-default bg-surface px-2 text-caption leading-none transition-colors hover:border-border-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring data-[state=open]:border-border-strong",
-            selected.length === 0 && !forcedOff ? "text-fg-3" : "text-fg-1",
+            issue ? "text-danger-text" : entries ? "text-fg-1" : "text-fg-3",
           )}
         >
-          <span className="min-w-0 flex-1 truncate text-left">
-            {triggerLabel}
-          </span>
+          <span className="min-w-0 flex-1 truncate text-left">{summary}</span>
           <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-60" />
         </button>
       </PopoverTrigger>
@@ -132,145 +155,192 @@ function DshReasoningLevelsEditor({
         align="start"
         sideOffset={6}
         avoidCollisions
-        collisionPadding={8}
-        className="z-[1000] w-72 p-1"
+        collisionPadding={12}
+        className="z-[1000] w-[22rem] p-2"
       >
-        <div
-          role="group"
-          aria-label={t("dshReasoning.label", { defaultValue: "Reasoning" })}
-        >
-          {DSH_REASONING_LEVELS.map((level) => {
-            const active = !!efforts && level in efforts;
-            // 落盘的值可能是 null（不发任何思考参数）或自定义字面值。
-            const wire = active ? (efforts?.[level] ?? null) : null;
-            const blocked = blockedLevel === level;
-            return (
-              <button
-                key={level}
-                type="button"
-                role="checkbox"
-                aria-checked={active}
-                aria-disabled={blocked ? true : undefined}
-                data-level={level}
-                title={
-                  active
-                    ? wire === null
-                      ? t("dshReasoning.chipSilent", {
-                          defaultValue: "No reasoning parameter is sent",
-                        })
-                      : t("dshReasoning.chipWire", {
-                          defaultValue: "Sends: {{wire}}",
-                          wire,
-                        })
-                    : undefined
-                }
-                onClick={() => {
-                  if (blocked) return;
-                  onToggle(level);
-                }}
-                className={cn(
-                  "flex w-full items-center gap-2 rounded-control px-2 py-1 text-left text-caption focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                  active ? "text-fg-1" : "text-fg-2",
-                  blocked ? "cursor-not-allowed opacity-60" : "hover:bg-subtle",
-                )}
-              >
-                <Check
-                  className={cn(
-                    "h-3.5 w-3.5 shrink-0",
-                    active ? "text-action-text opacity-100" : "opacity-0",
-                  )}
-                />
-                <span className="flex-1">{level}</span>
-                <span
+        <div className="space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-1">
+              <span className="text-caption font-medium text-fg-1">
+                {t("dshReasoning.label", { defaultValue: "Reasoning" })}
+              </span>
+              <span title={t("dshReasoning.help", { defaultValue: "" })}>
+                <HelpCircle
                   aria-hidden="true"
-                  className="max-w-32 truncate text-fg-3"
-                >
-                  {active
-                    ? wire === null
-                      ? t("dshReasoning.noParam", { defaultValue: "Not sent" })
-                      : wire
-                    : "—"}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-        {blockedLevel && (
-          <p className="px-2 pt-1 pb-0.5 text-caption text-fg-3">
-            {t("dshReasoning.keepOne", {
-              defaultValue: "At least one level must stay enabled",
-            })}
-          </p>
-        )}
-        {(recommendedFamily ||
-          forcedOff ||
-          adaptive ||
-          (clearable && onClear)) && (
-          <div className="mt-1 space-y-0.5 border-t border-border-default px-1 pt-1">
-            {recommendedFamily && !recommendedApplied && onApplyPreset && (
-              <button
-                type="button"
-                onClick={onApplyPreset}
-                className="block w-full rounded-control px-1.5 py-1 text-left text-caption text-action-text hover:bg-subtle hover:underline"
-              >
-                {t("dshReasoning.applyPreset", {
-                  defaultValue: "Use {{family}} preset",
-                  family: recommendedFamily,
-                })}
-              </button>
-            )}
-            {recommendedFamily && recommendedApplied && (
-              <p className="px-1.5 py-1 text-caption text-fg-3">
-                {t("dshReasoning.recommended", {
-                  defaultValue: "{{family}} preset",
-                  family: recommendedFamily,
-                })}
-              </p>
-            )}
-            {forcedOff && (
-              <p className="px-1.5 py-1 text-caption text-fg-3">
-                {t("dshReasoning.forcedOff", {
-                  defaultValue: "Reasoning disabled (false)",
-                })}
-              </p>
-            )}
-            {adaptive && (
-              <p className="px-1.5 py-1 text-caption text-fg-3">
-                {t("dshReasoning.adaptive", {
-                  defaultValue: "Adaptive thinking on",
-                })}
-              </p>
-            )}
-            {clearable && onClear && (
-              <button
-                type="button"
-                onClick={onClear}
-                aria-label={t("dshReasoning.clear", {
-                  defaultValue: "Clear reasoning levels",
-                })}
-                className="flex w-full items-center gap-1.5 rounded-control px-1.5 py-1 text-left text-caption text-fg-2 hover:bg-subtle hover:text-fg-1"
-              >
-                <X className="h-3.5 w-3.5 shrink-0" />
-                {t("dshReasoning.clear", {
-                  defaultValue: "Clear reasoning levels",
-                })}
-              </button>
-            )}
+                  className="h-3.5 w-3.5 shrink-0 text-fg-3"
+                />
+              </span>
+            </div>
+            <Switch
+              size="sm"
+              checked={entries !== undefined}
+              disabled={disabled}
+              aria-label={t("dshReasoning.label", {
+                defaultValue: "Reasoning",
+              })}
+              onCheckedChange={(checked) => {
+                setTyping(undefined);
+                onChange(
+                  checked
+                    ? (Object.fromEntries(
+                        dshReasoningInitialEntries(),
+                      ) as DshReasoningEfforts)
+                    : undefined,
+                );
+              }}
+            />
           </div>
-        )}
+
+          {entries ? (
+            <div className="space-y-1.5">
+              <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_2rem] items-center gap-1.5 text-caption text-fg-3">
+                <span>
+                  {t("dshReasoning.level", { defaultValue: "Level" })}
+                </span>
+                <span>
+                  {t("dshReasoning.value", { defaultValue: "Value" })}
+                </span>
+                <span />
+              </div>
+              {entries.map(([level, wire], index) => (
+                <div
+                  key={`${level}-${index}`}
+                  className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_2rem] items-center gap-1.5"
+                >
+                  <select
+                    value={level}
+                    aria-label={`${t("dshReasoning.level", {
+                      defaultValue: "Level",
+                    })} ${index + 1}`}
+                    aria-invalid={issueIndex === index ? true : undefined}
+                    disabled={disabled}
+                    onChange={(event) =>
+                      commit(
+                        dshReasoningWithLevel(
+                          entries,
+                          index,
+                          event.target.value,
+                        ),
+                      )
+                    }
+                    className="h-8 w-full min-w-0 rounded-md border border-border-default bg-surface px-1 text-caption text-fg-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    {dshReasoningLevelChoices(level, usedLevels).map(
+                      (choice) => (
+                        <option key={choice} value={choice}>
+                          {choice}
+                        </option>
+                      ),
+                    )}
+                  </select>
+                  <Input
+                    value={
+                      typing?.index === index
+                        ? typing.text
+                        : formatDshReasoningWire(wire)
+                    }
+                    aria-label={`${t("dshReasoning.value", {
+                      defaultValue: "Value",
+                    })} ${index + 1}`}
+                    aria-invalid={issueIndex === index ? true : undefined}
+                    disabled={disabled || level === "off"}
+                    placeholder={
+                      level === "off"
+                        ? t("dshReasoning.offPlaceholder", {
+                            defaultValue: "Not sent",
+                          })
+                        : level
+                    }
+                    onChange={(event) => {
+                      const text = event.target.value;
+                      setTyping({ index, text });
+                      onChange(
+                        Object.fromEntries(
+                          dshReasoningWithWire(entries, index, text),
+                        ) as DshReasoningEfforts,
+                      );
+                    }}
+                    onBlur={() => {
+                      // 照抄原生 `leaveValue`（client.js:366-369）：失焦时值仍
+                      // 不被接受（例如存量空串 / null / 数字），就回落到该档位
+                      // 默认值，别把无法提交的脏值原样留在表单里。
+                      setTyping(undefined);
+                      const accepted =
+                        (typeof wire === "string" && wire.trim() !== "") ||
+                        (wire === null && level === "off");
+                      if (accepted) return;
+                      const next: DshReasoningEntries = entries.map(
+                        ([entryLevel, entryWire]) => [entryLevel, entryWire],
+                      );
+                      next[index] = [level, dshReasoningDefaultValue(level)];
+                      onChange(Object.fromEntries(next) as DshReasoningEfforts);
+                    }}
+                    className="h-8 w-full min-w-0 text-caption"
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    disabled={disabled}
+                    aria-label={t("dshReasoning.removeLevel", {
+                      defaultValue: "Remove level",
+                    })}
+                    title={t("dshReasoning.removeLevel", {
+                      defaultValue: "Remove level",
+                    })}
+                    onClick={() =>
+                      commit(entries.filter((_, i) => i !== index))
+                    }
+                    className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              ))}
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled={disabled || nextLevel === undefined}
+                onClick={() => {
+                  if (nextLevel === undefined) return;
+                  commit([
+                    ...entries,
+                    [nextLevel, dshReasoningDefaultValue(nextLevel)],
+                  ]);
+                }}
+                className="h-7 gap-1 px-1.5 text-caption"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                {t("dshReasoning.addLevel", { defaultValue: "Add level" })}
+              </Button>
+              {issueText && (
+                <p role="alert" className="text-caption text-danger-text">
+                  {issueText}
+                </p>
+              )}
+            </div>
+          ) : (
+            <p className="text-caption text-fg-3">
+              {efforts === false
+                ? t("dshReasoning.disabled", { defaultValue: "Disabled" })
+                : t("dshReasoning.inheritHint", { defaultValue: "" })}
+            </p>
+          )}
+        </div>
       </PopoverContent>
     </Popover>
   );
 }
 
 interface DeepSeekHarnessFormFieldsProps {
+  /** 官方 `llm-deepseek` 路由：models schema 里没有 `reasoningEfforts`，
+   * 所以不渲染模型级「思考强度」列。已有的字段原样透传、不被清掉。 */
   isOfficial: boolean;
 
   // Provider display name and generation limits
   displayName: string;
   onDisplayNameChange: (value: string) => void;
-  reasoningEffort: string;
-  onReasoningEffortChange: (value: string) => void;
   maxTokens: string;
   onMaxTokensChange: (value: string) => void;
 
@@ -309,8 +379,6 @@ export function DeepSeekHarnessFormFields({
   isOfficial,
   displayName,
   onDisplayNameChange,
-  reasoningEffort,
-  onReasoningEffortChange,
   maxTokens,
   onMaxTokensChange,
   apiKey,
@@ -338,52 +406,6 @@ export function DeepSeekHarnessFormFields({
   const [isFetchingModels, setIsFetchingModels] = useState(false);
   const [presetMatchOpen, setPresetMatchOpen] = useState(false);
 
-  /** 点等级行：加/减一个等级；全减完就删掉整个字段（回到「未设置」）。 */
-  const handleToggleReasoningLevel = (index: number, level: string) => {
-    const model = models[index];
-    if (!model) return;
-    updateModel(index, {
-      reasoningEfforts: toggleDshReasoningLevel(
-        model.reasoningEfforts,
-        level,
-        dshReasoningPresetFor(model.id),
-      ),
-    });
-  };
-
-  /** 「推荐」：套用模型族的推荐等级表；Claude 走 Anthropic 通道时同时开自适应思考。 */
-  const handleApplyReasoningPreset = (index: number) => {
-    const model = models[index];
-    if (!model) return;
-    const preset = dshReasoningPresetFor(model.id);
-    if (!preset) return;
-    const compat: Record<string, unknown> = { ...(model.compat ?? {}) };
-    // 插件只在「推荐表要求自适应 + 走 Anthropic 通道」时才写这个开关；
-    // 其余情况一律清掉，免得换模型 / 换通道后留着上一条记录的残值。
-    if (preset.adaptive && api === "anthropic-messages") {
-      compat.forceAdaptiveThinking = true;
-    } else {
-      delete compat.forceAdaptiveThinking;
-    }
-    const patch: Partial<DshModel> = {
-      reasoningEfforts: orderDshReasoningEfforts(preset.efforts),
-      compat: Object.keys(compat).length > 0 ? compat : undefined,
-    };
-    updateModel(index, patch);
-  };
-
-  /** 清掉这一行的 reasoningEfforts（写回「未设置」，不是写 `{}`）。 */
-  const handleClearReasoningEfforts = (index: number) => {
-    const model = models[index];
-    if (!model) return;
-    const compat: Record<string, unknown> = { ...(model.compat ?? {}) };
-    delete compat.forceAdaptiveThinking;
-    updateModel(index, {
-      reasoningEfforts: undefined,
-      compat: Object.keys(compat).length > 0 ? compat : undefined,
-    });
-  };
-
   const handleFetchModels = useCallback(() => {
     if (!baseUrl || !apiKey) {
       showFetchModelsError(null, t, {
@@ -409,7 +431,8 @@ export function DeepSeekHarnessFormFields({
 
   /**
    * 改某一行。值为 `undefined` 的补丁会**删掉**这个键：写进 cordis.patch.yml 的
-   * 模型行要么带字段、要么整段省略，不能留下 `reasoningEfforts: {}` / `null`。
+   * 模型行要么带字段、要么整段省略。注意 `reasoningEfforts` 只有「缺省」才表示
+   * 继承目录能力，`{}` 是原生 schema 允许的中间态，不能顺手删掉。
    */
   const updateModel = (index: number, patch: Partial<DshModel>) => {
     onModelsChange(
@@ -486,40 +509,24 @@ export function DeepSeekHarnessFormFields({
         </p>
       </div>
 
-      {/* Generation options */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <div className="space-y-2">
-          <FormLabel htmlFor="dsh-reasoning-effort">
-            {t("deepseekHarness.reasoningEffort")}
-          </FormLabel>
-          <Input
-            id="dsh-reasoning-effort"
-            value={reasoningEffort}
-            onChange={(event) => onReasoningEffortChange(event.target.value)}
-            placeholder="high"
-          />
-          <p className="text-xs text-muted-foreground">
-            {t("deepseekHarness.reasoningEffortHint")}
-          </p>
-        </div>
-        <div className="space-y-2">
-          <FormLabel htmlFor="dsh-max-tokens">
-            {t("deepseekHarness.maxTokens")}
-          </FormLabel>
-          <Input
-            id="dsh-max-tokens"
-            type="number"
-            min={0}
-            step={1}
-            inputMode="numeric"
-            value={maxTokens}
-            onChange={(event) => onMaxTokensChange(event.target.value)}
-            placeholder=""
-          />
-          <p className="text-xs text-muted-foreground">
-            {t("deepseekHarness.maxTokensHint")}
-          </p>
-        </div>
+      {/* Generation options：思考强度已经改为模型级「思考强度」列，这里只剩上限。 */}
+      <div className="space-y-2">
+        <FormLabel htmlFor="dsh-max-tokens">
+          {t("deepseekHarness.maxTokens")}
+        </FormLabel>
+        <Input
+          id="dsh-max-tokens"
+          type="number"
+          min={0}
+          step={1}
+          inputMode="numeric"
+          value={maxTokens}
+          onChange={(event) => onMaxTokensChange(event.target.value)}
+          placeholder=""
+        />
+        <p className="text-xs text-muted-foreground">
+          {t("deepseekHarness.maxTokensHint")}
+        </p>
       </div>
 
       {/* API Key */}
@@ -669,8 +676,14 @@ export function DeepSeekHarnessFormFields({
           </p>
         ) : (
           <div className="space-y-2">
-            {/* 列头：与 Codex 的模型目錄一致，md+ 一行一列。 */}
-            <div className="hidden grid-cols-[minmax(0,1fr)_minmax(0,1fr)_140px_minmax(0,1fr)_36px] gap-2 px-2 text-xs text-muted-foreground md:grid">
+            {/* 列头：与 Codex 的模型目錄一致，md+ 一行一列。官方路由没有
+                「思考强度」列（原生 `llm-deepseek` 的 models schema 里没有这个字段）。 */}
+            <div
+              className={cn(
+                "hidden gap-2 px-2 text-xs text-muted-foreground md:grid",
+                isOfficial ? MODEL_GRID_OFFICIAL : MODEL_GRID_CUSTOM,
+              )}
+            >
               <span>
                 {t("deepseekHarness.modelName", {
                   defaultValue: "Display Name",
@@ -684,37 +697,21 @@ export function DeepSeekHarnessFormFields({
                   defaultValue: "Context Window",
                 })}
               </span>
-              <span>
-                {t("dshReasoning.label", { defaultValue: "Reasoning" })}
-              </span>
+              {!isOfficial && (
+                <span>
+                  {t("dshReasoning.label", { defaultValue: "Reasoning" })}
+                </span>
+              )}
               <span />
             </div>
             {models.map((model, index) => {
-              // 这一行的推理等级：跟着模型族推荐值走，用户可以逐级微调。
-              const recommended = dshReasoningPresetFor(model.id);
-              const declared = model.reasoningEfforts;
-              const efforts = isDshReasoningEfforts(declared)
-                ? (declared as DshReasoningEfforts)
-                : undefined;
-              const isForcedOff = declared === false;
-              const isRecommended =
-                !!recommended &&
-                !!efforts &&
-                dshReasoningEffortsEqual(efforts, recommended.efforts);
-              const isAdaptive = model.compat?.forceAdaptiveThinking === true;
-              // 只剩最后一个非 off 等级时不允许取消（与插件面板一致）。
-              const nonOffLevels = efforts
-                ? DSH_REASONING_LEVELS.filter(
-                    (level) => level !== "off" && level in efforts,
-                  )
-                : [];
-              const blockedLevel =
-                nonOffLevels.length === 1 ? nonOffLevels[0] : undefined;
-
               return (
                 <div
                   key={model.rowKey ?? index}
-                  className="grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_140px_minmax(0,1fr)_36px]"
+                  className={cn(
+                    "grid grid-cols-1 gap-2",
+                    isOfficial ? MODEL_GRID_OFFICIAL : MODEL_GRID_CUSTOM,
+                  )}
                 >
                   <ImeSafeInput
                     value={model.name ?? ""}
@@ -769,20 +766,14 @@ export function DeepSeekHarnessFormFields({
                     placeholder="131072"
                     className="w-full"
                   />
-                  <DshReasoningLevelsEditor
-                    efforts={efforts}
-                    blockedLevel={blockedLevel}
-                    recommendedFamily={recommended?.family}
-                    recommendedApplied={isRecommended}
-                    forcedOff={isForcedOff}
-                    adaptive={isAdaptive}
-                    clearable={!!(efforts || isForcedOff)}
-                    onToggle={(level) =>
-                      handleToggleReasoningLevel(index, level)
-                    }
-                    onApplyPreset={() => handleApplyReasoningPreset(index)}
-                    onClear={() => handleClearReasoningEfforts(index)}
-                  />
+                  {!isOfficial && (
+                    <DshReasoningLevelsEditor
+                      efforts={model.reasoningEfforts}
+                      onChange={(next) =>
+                        updateModel(index, { reasoningEfforts: next })
+                      }
+                    />
+                  )}
                   <Button
                     type="button"
                     variant="ghost"

@@ -13,7 +13,6 @@ const baseModel: DshModel = {
   rowKey: "row-1",
   contextWindow: 128000,
   maxTokens: 8192,
-  reasoningEffort: "high",
   temperature: 0.3,
   reasoningEfforts: { low: "low", high: "high" },
   compat: { supportsStore: true, supportsDeveloperRole: false },
@@ -63,12 +62,15 @@ describe("provider field boundaries", () => {
 });
 
 describe("getDshModelPresetFields", () => {
-  it("去身份字段、保留 false/null、已知字段排前面", () => {
-    const fields = getDshModelPresetFields(baseModel);
+  it("去身份字段、保留 false/null、已知字段排前面，跳过旧插件字段", () => {
+    const fields = getDshModelPresetFields({
+      ...baseModel,
+      reasoningEffort: "high",
+      dsh: { contextWindow: 32000 },
+    });
     expect(fields.map((field) => field.key)).toEqual([
       "contextWindow",
       "maxTokens",
-      "reasoningEffort",
       "temperature",
       "reasoningEfforts",
       "compat",
@@ -76,6 +78,8 @@ describe("getDshModelPresetFields", () => {
       "unknownFlag",
       "nullable",
     ]);
+    expect(fields.map((field) => field.key)).not.toContain("reasoningEffort");
+    expect(fields.map((field) => field.key)).not.toContain("dsh");
     expect(fields.find((field) => field.key === "unknownFlag")?.value).toBe(
       false,
     );
@@ -125,7 +129,6 @@ describe("dshModelFieldsToPresetParams", () => {
     const params = dshModelFieldsToPresetParams(baseModel, [
       "contextWindow",
       "maxTokens",
-      "reasoningEffort",
       "temperature",
       "reasoningEfforts",
       "compat",
@@ -137,7 +140,6 @@ describe("dshModelFieldsToPresetParams", () => {
     expect(params).toEqual({
       contextWindow: 128000,
       maxOutputTokens: 8192,
-      reasoningEffort: "high",
       temperature: 0.3,
       extraParams: {
         reasoningEfforts: { low: "low", high: "high" },
@@ -180,22 +182,32 @@ describe("dshModelFieldsToPresetParams", () => {
     const model = {
       id: "m",
       contextWindow: "128k",
-      reasoningEffort: false,
       temperature: null,
     } as unknown as DshModel;
     expect(
-      dshModelFieldsToPresetParams(model, [
-        "contextWindow",
-        "reasoningEffort",
-        "temperature",
-      ]),
+      dshModelFieldsToPresetParams(model, ["contextWindow", "temperature"]),
     ).toEqual({
       extraParams: {
         contextWindow: "128k",
-        reasoningEffort: false,
         temperature: null,
       },
     });
+  });
+
+  it("旧插件的模型级 reasoningEffort 不进入预设", () => {
+    const model = {
+      ...baseModel,
+      reasoningEffort: "high",
+    } as DshModel;
+    expect(
+      dshModelFieldsToPresetParams(model, Object.keys(model)),
+    ).not.toHaveProperty("reasoningEffort");
+    expect(
+      (
+        dshModelFieldsToPresetParams(model, Object.keys(model))
+          .extraParams as Record<string, unknown>
+      ).reasoningEffort,
+    ).toBeUndefined();
   });
 
   it("未知字段和 maxOutputTokens 的值都会深拷贝", () => {
@@ -229,7 +241,6 @@ describe("applyPresetToDshModel", () => {
     expect(applied.temperature).toBe(0.7);
     expect(applied.contextWindow).toBe(128000);
     expect(applied.maxTokens).toBe(8192);
-    expect(applied.reasoningEffort).toBe("high");
     expect(applied.reasoningEfforts).toEqual(baseModel.reasoningEfforts);
     expect(applied.compat).toEqual(baseModel.compat);
     expect(applied.input).toEqual(baseModel.input);
@@ -267,6 +278,24 @@ describe("applyPresetToDshModel", () => {
       supportsDeveloperRole: false,
     });
     expect(baseModel.reasoningEfforts).toEqual({ low: "low", high: "high" });
+  });
+
+  it("忽略旧插件的模型级 reasoningEffort 与 extraParams.dsh 命名空间", () => {
+    const applied = applyPresetToDshModel(
+      { id: "m" },
+      {
+        reasoningEffort: "max",
+        extraParams: {
+          reasoningEffort: "high",
+          dsh: { contextWindow: 32000 },
+          custom: 1,
+        },
+      } as ModelPresetParams,
+    );
+
+    expect(applied).toEqual({ id: "m", custom: 1 });
+    expect(applied).not.toHaveProperty("reasoningEffort");
+    expect(applied).not.toHaveProperty("dsh");
   });
 
   it("extraParams 不覆盖身份字段和原型污染键", () => {

@@ -1274,8 +1274,9 @@
     "defaultModelBackgroundHint": "This provider is not the route DSH currently uses; default-model changes would not apply.",
     "displayName": "Display name",
     "displayNameHint": "Name shown in the sidebar and on the provider card",
-    "reasoningEffort": "Reasoning effort",
-    "reasoningEffortHint": "reasoningEffort written to the DSH config (leave empty to omit)",
+    "reasoningInvalid": "Cannot save: the reasoning levels for “{{model}}” are invalid ({{reason}}).",
+    "reasoningEffortRemoved": "Removed the legacy provider-level reasoning effort (reasoningEffort): native DSH pi-ai routes do not have this field. Declare thinking levels per model in the model row.",
+    "unnamedModel": "Unnamed model",
     "maxTokens": "Max output tokens",
     "maxTokensHint": "maxTokens written to the DSH config (leave empty to omit)"
   },
@@ -5075,14 +5076,16 @@
     "label": "Reasoning",
     "notSet": "Not set",
     "disabled": "Disabled",
-    "chipWire": "Sends: {{wire}}",
-    "chipSilent": "No reasoning parameter is sent",
-    "noParam": "Not sent",
-    "keepOne": "At least one level must stay enabled",
-    "applyPreset": "Use {{family}} preset",
-    "recommended": "{{family}} preset",
-    "clear": "Clear reasoning levels",
-    "forcedOff": "Reasoning disabled",
-    "adaptive": "Adaptive thinking on"
+    "needsLevelShort": "Needs setup",
+    "inheritHint": "When no reasoning levels are declared, DSH falls back to the model catalog's capabilities.",
+    "help": "Reasoning levels are declared per model: each level maps to an API parameter value sent with the request. Off turns thinking off; values already present in the config are kept and sent.",
+    "level": "Level",
+    "value": "API value",
+    "offPlaceholder": "Thinking off",
+    "addLevel": "Add level",
+    "removeLevel": "Remove level",
+    "needsLevel": "Add at least one level other than Off; turn reasoning off if the model should not think.",
+    "valueRequired": "The API value for “{{level}}” cannot be empty.",
+    "unknownLevel": "“{{level}}” is not a reasoning level supported by DSH."
   }
 }

@@ -35,10 +35,22 @@ const CONNECTION_KEYS = new Set([
   "secret",
 ]);
 
+/**
+ * 旧插件 / 旧预设留下的非原生字段：
+ * - 模型行上的单字符串 `reasoningEffort`；
+ * - `dsh.1`–`dsh.3` 目录预设写在 `extraParams.dsh` 里的命名空间。
+ * 两者都不是 pi-ai 模型行字段，导入和套用都跳过。
+ */
+const LEGACY_MODEL_KEYS: ReadonlySet<string> = new Set([
+  "reasoningEffort",
+  "dsh",
+]);
+
 function isExcludedField(key: string): boolean {
   return (
     IDENTITY_KEYS.has(key) ||
     UNSAFE_KEYS.has(key) ||
+    LEGACY_MODEL_KEYS.has(key) ||
     CONNECTION_KEYS.has(key.toLowerCase())
   );
 }
@@ -51,7 +63,6 @@ const FIELD_ORDER: readonly string[] = [
   "contextWindow",
   "maxTokens",
   "maxOutputTokens",
-  "reasoningEffort",
   "temperature",
   "reasoningEfforts",
   "compat",
@@ -136,11 +147,12 @@ export function getDshModelPresetFields(
  * 把用户勾选的 DSH 模型字段转成模型预设参数。
  *
  * 映射关系：
- * - `contextWindow` / `reasoningEffort` / `temperature` 同名直传；
+ * - `contextWindow` / `temperature` 同名直传；
  * - `maxTokens` → `maxOutputTokens`（`maxOutputTokens` 也兼容；两者都在时
  *   以原生 `maxTokens` 为准，另一个留在额外参数里，不丢）；
  * - 其余字段（`reasoningEfforts`、`compat`、`input`、`maxTokens` 之外的未知
  *   字段）原样放进 `extraParams`；
+ * - 旧插件的模型级 `reasoningEffort` 不是原生字段，不再导入；
  * - 值类型不符合参数契约时（例如字符串形式的 contextWindow）也放进
  *   `extraParams`，保证往返不丢数据；`false` / `null` 一律保留。
  */
@@ -188,14 +200,6 @@ export function dshModelFieldsToPresetParams(
     }
   }
 
-  if (wants("reasoningEffort")) {
-    const value = read("reasoningEffort");
-    if (typeof value === "string") params.reasoningEffort = value;
-    else if (value !== undefined) {
-      extraParams.reasoningEffort = deepCopyValue(value);
-    }
-  }
-
   if (wants("temperature")) {
     const value = read("temperature");
     if (isFiniteNumber(value)) params.temperature = value;
@@ -207,7 +211,6 @@ export function dshModelFieldsToPresetParams(
     "contextWindow",
     "maxTokens",
     "maxOutputTokens",
-    "reasoningEffort",
     "temperature",
   ]);
 
@@ -235,7 +238,8 @@ export function dshModelFieldsToPresetParams(
  * - `extraParams` 的键落在模型行顶层；
  * - `compat` 与原有 compat 浅合并，保留模型上其他兼容开关；
  * - `reasoningEfforts` 整表替换（不会残留旧等级），并且深拷贝；
- * - `id` / `name` / `rowKey` 以及原型污染键不会被 `extraParams` 覆盖。
+ * - `id` / `name` / `rowKey` 以及原型污染键不会被 `extraParams` 覆盖；
+ * - 旧插件的模型级 `reasoningEffort` 不是原生字段，忽略不写。
  */
 export function applyPresetToDshModel(
   model: DshModel,
@@ -249,9 +253,6 @@ export function applyPresetToDshModel(
   }
   if (isTokenCount(params.maxOutputTokens)) {
     target.maxTokens = params.maxOutputTokens;
-  }
-  if (typeof params.reasoningEffort === "string") {
-    target.reasoningEffort = params.reasoningEffort;
   }
   if (isFiniteNumber(params.temperature)) {
     target.temperature = params.temperature;
