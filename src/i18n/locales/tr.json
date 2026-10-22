@@ -2359,6 +2359,14 @@
       "label": "Model",
       "title": "Modele göre filtrele (sağlayıcı filtresini takip eder)"
     },
+    "granularity": {
+      "label": "Ayrıntı düzeyi",
+      "title": "Trend zaman ayrıntı düzeyi",
+      "10m": "10 dk",
+      "30m": "30 dk",
+      "1h": "1 saat",
+      "1d": "1 gün"
+    },
     "metrics": {
       "label": "Metrikler",
       "more": "Daha fazla metrik",

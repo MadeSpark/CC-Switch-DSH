@@ -5,9 +5,13 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import { usageApi } from "@/lib/api/usage";
-import { resolveUsageRange } from "@/lib/usageRange";
+import {
+  getUsageGranularitySeconds,
+  resolveUsageRange,
+} from "@/lib/usageRange";
 import type {
   LogFilters,
+  UsageGranularity,
   UsageRangeSelection,
   UsageScopeFilters,
 } from "@/types/usage";
@@ -18,6 +22,11 @@ type UsageQueryOptions = {
   enabled?: boolean;
   refetchInterval?: number | false;
   refetchIntervalInBackground?: boolean;
+};
+
+type UsageTrendQueryOptions = UsageQueryOptions & {
+  /** 趋势桶的时间粒度；缺省时不发 bucketSeconds，后端按跨度自动选（热力图用） */
+  granularity?: UsageGranularity;
 };
 
 type RequestLogsQueryArgs = {
@@ -83,6 +92,7 @@ export const usageKeys = {
     customEndDate: number | undefined,
     filters?: UsageScopeFilters,
     liveEndTime?: boolean,
+    granularity?: UsageGranularity,
   ) =>
     [
       ...usageKeys.all,
@@ -94,6 +104,7 @@ export const usageKeys = {
       filters?.appType ?? null,
       filters?.providerName ?? null,
       filters?.model ?? null,
+      granularity ?? null,
     ] as const,
   firstDate: (filters?: UsageScopeFilters) =>
     [
@@ -238,9 +249,10 @@ export function useUsageSummaryByApp(
 export function useUsageTrends(
   range: UsageRangeSelection,
   filters?: UsageScopeFilters,
-  options?: UsageQueryOptions,
+  options?: UsageTrendQueryOptions,
 ) {
   const effective = normalizeScopeFilters(filters);
+  const granularity = options?.granularity;
   return useQuery({
     queryKey: usageKeys.trends(
       range.preset,
@@ -248,6 +260,7 @@ export function useUsageTrends(
       range.customEndDate,
       effective,
       range.liveEndTime,
+      granularity,
     ),
     queryFn: () => {
       const { startDate, endDate } = resolveUsageRange(range);
@@ -257,6 +270,7 @@ export function useUsageTrends(
         effective.appType,
         effective.providerName,
         effective.model,
+        granularity ? getUsageGranularitySeconds(granularity) : undefined,
       );
     },
     enabled: options?.enabled ?? true,

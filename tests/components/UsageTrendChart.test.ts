@@ -382,3 +382,44 @@ describe("buildUsageTrendChartData models mapping", () => {
     expect(points[0].models).toBeUndefined();
   });
 });
+
+describe("buildUsageTrendChartData granularity labels", () => {
+  // 用本地时间构造，避免测试机时区影响「时:分」
+  const at = (hour: number, minute: number) => ({
+    date: new Date(2026, 8, 30, hour, minute).toISOString(),
+    totalInputTokens: 1,
+    totalOutputTokens: 1,
+    totalCacheCreationTokens: 0,
+    totalCacheReadTokens: 0,
+    totalCost: "0",
+  });
+  const startDate = Math.floor(new Date(2026, 8, 30).getTime() / 1000);
+  const endDate = startDate + 24 * 60 * 60;
+
+  it("shows hour:minute for sub-day buckets (10m / 30m / 1h)", () => {
+    const points = buildUsageTrendChartData([at(10, 10), at(10, 30)], {
+      isHourly: true,
+      dateLocale: "en-GB",
+      startDate,
+      endDate,
+    });
+
+    expect(points[0].label).toContain("10:10");
+    expect(points[1].label).toContain("10:30");
+    expect(points[0].tooltipLabel).toContain("10:10");
+    expect(points[0].tooltipLabel).toMatch(/2026/);
+  });
+
+  it("shows only the date for 1d buckets", () => {
+    const points = buildUsageTrendChartData([at(0, 0)], {
+      isHourly: false,
+      dateLocale: "en-GB",
+      startDate,
+      endDate,
+    });
+
+    expect(points[0].label).toBe("30/09");
+    expect(points[0].label).not.toMatch(/:/);
+    expect(points[0].tooltipLabel).not.toMatch(/:/);
+  });
+});

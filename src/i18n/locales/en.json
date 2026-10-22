@@ -2448,6 +2448,14 @@
       "label": "Model",
       "title": "Filter by model (follows the provider filter)"
     },
+    "granularity": {
+      "label": "Granularity",
+      "title": "Trend time granularity",
+      "10m": "10 min",
+      "30m": "30 min",
+      "1h": "1 hour",
+      "1d": "1 day"
+    },
     "metrics": {
       "label": "Metrics",
       "more": "More metrics",

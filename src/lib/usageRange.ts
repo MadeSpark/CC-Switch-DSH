@@ -1,4 +1,8 @@
-import type { UsageRangePreset, UsageRangeSelection } from "@/types/usage";
+import type {
+  UsageGranularity,
+  UsageRangePreset,
+  UsageRangeSelection,
+} from "@/types/usage";
 
 const DAY_SECONDS = 24 * 60 * 60;
 const DAY_MS = DAY_SECONDS * 1000;
@@ -59,6 +63,61 @@ export function resolveUsageRange(
         startDate,
         endDate: customEndDate,
       };
+    }
+  }
+}
+
+/** 粒度下拉的选项顺序（由细到粗） */
+export const USAGE_GRANULARITIES: readonly UsageGranularity[] = [
+  "10m",
+  "30m",
+  "1h",
+  "1d",
+];
+
+/** 粒度 → 后端 bucket_seconds */
+export const USAGE_GRANULARITY_SECONDS: Record<UsageGranularity, number> = {
+  "10m": 600,
+  "30m": 1800,
+  "1h": 3600,
+  "1d": DAY_SECONDS,
+};
+
+export function getUsageGranularitySeconds(
+  granularity: UsageGranularity,
+): number {
+  return USAGE_GRANULARITY_SECONDS[granularity];
+}
+
+/** 小于一天的粒度：图表用「日期 + 时:分」标签；1d 只显示日期 */
+export function isSubDayUsageGranularity(
+  granularity: UsageGranularity,
+): boolean {
+  return USAGE_GRANULARITY_SECONDS[granularity] < DAY_SECONDS;
+}
+
+/**
+ * 时间范围对应的默认粒度。切换任何时间范围（预设或自定义日历）都按它重置。
+ * today → 30m；1d / 7d → 1h；14d / 30d → 1d；
+ * custom 跨度 > 7 天 → 1d，否则 1h；all 不显示粒度控件，兜底 1d。
+ */
+export function getDefaultUsageGranularity(
+  selection: UsageRangeSelection,
+  nowMs: number = Date.now(),
+): UsageGranularity {
+  switch (selection.preset) {
+    case "today":
+      return "30m";
+    case "1d":
+    case "7d":
+      return "1h";
+    case "14d":
+    case "30d":
+    case "all":
+      return "1d";
+    case "custom": {
+      const { startDate, endDate } = resolveUsageRange(selection, nowMs);
+      return endDate - startDate > 7 * DAY_SECONDS ? "1d" : "1h";
     }
   }
 }

@@ -93,6 +93,8 @@ export const usageApi = {
     appType?: string,
     providerName?: string,
     model?: string,
+    /** 桶宽（秒）：600 / 1800 / 3600 / 86400；缺省时后端按跨度自动选 1h / 1d */
+    bucketSeconds?: number,
   ): Promise<DailyStats[]> => {
     return invoke("get_usage_trends", {
       startDate,
@@ -100,6 +102,7 @@ export const usageApi = {
       appType,
       providerName,
       model,
+      bucketSeconds,
     });
   },
 

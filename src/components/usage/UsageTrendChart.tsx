@@ -21,8 +21,8 @@ import {
   parseFiniteNumber,
   type TokenUnit,
 } from "./format";
-import { resolveUsageRange } from "@/lib/usageRange";
-import type { UsageRangeSelection } from "@/types/usage";
+import { isSubDayUsageGranularity, resolveUsageRange } from "@/lib/usageRange";
+import type { UsageGranularity, UsageRangeSelection } from "@/types/usage";
 import { useMoneyFormat } from "@/hooks/useMoneyFormat";
 import { useTokenFormat } from "@/hooks/useTokenFormat";
 import { USAGE_CHOICE_KEYS, useRememberedChoice } from "./rememberedChoice";
@@ -43,6 +43,11 @@ interface UsageTrendChartProps {
   providerName?: string;
   /** undefined = 全部模型；有值 = 单个模型（tooltip 不再拆模型区）。 */
   model?: string;
+  /**
+   * 趋势桶的时间粒度。10m / 30m / 1h 用「日期 + 时:分」标签，1d 只显示日期。
+   * 缺省时保持旧行为：不发 bucketSeconds，跨度 ≤ 24h 按小时、否则按天。
+   */
+  granularity?: UsageGranularity;
   refreshIntervalMs: number;
 }
 
@@ -289,6 +294,7 @@ export function UsageTrendChart({
   appType,
   providerName,
   model,
+  granularity,
   refreshIntervalMs,
 }: UsageTrendChartProps) {
   const { t, i18n } = useTranslation();
@@ -309,12 +315,15 @@ export function UsageTrendChart({
     range,
     { appType, providerName, model },
     {
+      granularity,
       refetchInterval: refreshIntervalMs > 0 ? refreshIntervalMs : false,
     },
   );
 
   const durationSeconds = Math.max(endDate - startDate, 0);
-  const isHourly = durationSeconds <= 24 * 60 * 60;
+  const isHourly = granularity
+    ? isSubDayUsageGranularity(granularity)
+    : durationSeconds <= 24 * 60 * 60;
   const language = i18n.resolvedLanguage || i18n.language || "en";
   const dateLocale = getLocaleFromLanguage(language);
 

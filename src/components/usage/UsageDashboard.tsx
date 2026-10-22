@@ -30,6 +30,7 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import {
   KNOWN_APP_TYPES,
   type AppTypeFilter,
+  type UsageGranularity,
   type UsageRangePreset,
   type UsageRangeSelection,
 } from "@/types/usage";
@@ -42,7 +43,12 @@ import {
 import { useUsageEventBridge } from "@/hooks/useUsageEventBridge";
 import { useUsageAutoRefresh } from "@/hooks/useUsageAutoRefresh";
 import { usageApi } from "@/lib/api/usage";
-import { getUsageRangePresetLabel, resolveUsageRange } from "@/lib/usageRange";
+import {
+  USAGE_GRANULARITIES,
+  getDefaultUsageGranularity,
+  getUsageRangePresetLabel,
+  resolveUsageRange,
+} from "@/lib/usageRange";
 import { cn } from "@/lib/utils";
 import { UsageHero } from "./UsageHero";
 import { UsageTrendChart } from "./UsageTrendChart";
@@ -197,8 +203,13 @@ export function UsageDashboard({
       "today",
     ),
   }));
+  // 趋势图时间粒度：切换任何时间范围都按默认映射重置，手动选的粒度只到下次切范围为止
+  const [granularity, setGranularity] = useState<UsageGranularity>(() =>
+    getDefaultUsageGranularity(range),
+  );
   const applyRange = (next: UsageRangeSelection) => {
     setRange(next);
+    setGranularity(getDefaultUsageGranularity(next));
     if (next.preset !== "custom") {
       writeRememberedChoice(USAGE_CHOICE_KEYS.range, next.preset);
     }
@@ -673,6 +684,42 @@ export function UsageDashboard({
         triggerLabel={rangeLabel}
         onApply={applyRange}
       />
+      {/* 「全部」看热力图，与趋势粒度无关，不显示粒度控件 */}
+      {range.preset !== "all" && (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              type="button"
+              variant="neutral"
+              size="regular"
+              className="min-w-[66px] shrink-0 gap-1 pe-2 ps-3"
+              aria-label={t("usage.granularity.label")}
+              title={t("usage.granularity.title")}
+            >
+              <span className="min-w-0 truncate">
+                {t(`usage.granularity.${granularity}`)}
+              </span>
+              <ChevronDown className="h-3.5 w-3.5 shrink-0 text-fg-2" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            align="end"
+            aria-label={t("usage.granularity.title")}
+            className={cn(menuContentClass, "min-w-[120px]")}
+          >
+            {USAGE_GRANULARITIES.map((option) => (
+              <DropdownMenuItem
+                key={option}
+                className={menuItemClass}
+                onSelect={() => setGranularity(option)}
+              >
+                <MenuCheck checked={granularity === option} />
+                {t(`usage.granularity.${option}`)}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
     </div>
   );
 
@@ -880,6 +927,7 @@ export function UsageDashboard({
             appType={appType}
             providerName={providerName}
             model={model}
+            granularity={granularity}
             refreshIntervalMs={0}
           />
         )}

@@ -74,7 +74,7 @@ pub async fn get_usage_summary_by_app(
     .await
 }
 
-/// 获取每日趋势
+/// 获取趋势；`bucket_seconds` 缺省时保持旧行为，仅允许 600/1800/3600/86400
 #[tauri::command]
 pub async fn get_usage_trends(
     state: State<'_, AppState>,
@@ -83,14 +83,16 @@ pub async fn get_usage_trends(
     app_type: Option<String>,
     provider_name: Option<String>,
     model: Option<String>,
+    bucket_seconds: Option<i64>,
 ) -> Result<Vec<DailyStats>, AppError> {
     run_db_query(&state, move |db| {
-        db.get_daily_trends(
+        db.get_usage_trends(
             start_date,
             end_date,
             app_type.as_deref(),
             provider_name.as_deref(),
             model.as_deref(),
+            bucket_seconds,
         )
     })
     .await

@@ -663,6 +663,12 @@ pub(crate) struct LogCountCache {
 
 const LOG_COUNT_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(60);
 
+/// 趋势图允许的桶粒度（秒）：10 分钟 / 30 分钟 / 1 小时 / 1 天。
+const ALLOWED_TREND_BUCKET_SECONDS: [i64; 4] = [600, 1800, 3600, 86_400];
+const DAY_BUCKET_SECONDS: i64 = 86_400;
+/// 子日桶数量上限（30 天 × 10 分钟 = 4320，仍可用）。
+const MAX_SUB_DAY_TREND_BUCKETS: i64 = 5000;
+
 /// 这条连接打开以来增删改过的总行数（SQLite 内置函数），任何写入都会让它变。
 fn connection_total_changes(conn: &Connection) -> Result<u64, AppError> {
     Ok(conn.query_row("SELECT total_changes()", [], |row| row.get::<_, i64>(0))? as u64)
@@ -1310,6 +1316,8 @@ impl Database {
     }
 
     /// 获取每日趋势（滑动窗口，<=24h 按小时，>24h 按天，窗口与汇总一致）
+    ///
+    /// 旧签名，等价于 `get_usage_trends(.., None)`。
     pub fn get_daily_trends(
         &self,
         start_date: Option<i64>,
@@ -1318,26 +1326,63 @@ impl Database {
         provider_name: Option<&str>,
         model: Option<&str>,
     ) -> Result<Vec<DailyStats>, AppError> {
+        self.get_usage_trends(start_date, end_date, app_type, provider_name, model, None)
+    }
+
+    /// 获取趋势，可指定桶粒度。
+    ///
+    /// - `bucket_seconds = None`：旧行为，跨度 <=24h 按小时，否则按天。
+    /// - `Some(86400)`：日桶（明细 + usage_daily_rollups）。
+    /// - `Some(600 | 1800 | 3600)`：按明细日志分桶，桶起点为窗口起点。
+    /// - 其他值返回 `InvalidInput`；子日桶数超过 `MAX_SUB_DAY_TREND_BUCKETS` 同样返回 `InvalidInput`。
+    pub fn get_usage_trends(
+        &self,
+        start_date: Option<i64>,
+        end_date: Option<i64>,
+        app_type: Option<&str>,
+        provider_name: Option<&str>,
+        model: Option<&str>,
+        bucket_seconds: Option<i64>,
+    ) -> Result<Vec<DailyStats>, AppError> {
+        if let Some(seconds) = bucket_seconds {
+            if !ALLOWED_TREND_BUCKET_SECONDS.contains(&seconds) {
+                return Err(AppError::InvalidInput(format!(
+                    "不支持的趋势粒度: {seconds} 秒（仅支持 600/1800/3600/86400）"
+                )));
+            }
+        }
+
         let conn = lock_conn!(self.conn);
 
         let end_ts = end_date.unwrap_or_else(|| Local::now().timestamp());
         let mut start_ts = start_date.unwrap_or_else(|| end_ts - 24 * 60 * 60);
 
         if start_ts >= end_ts {
-            start_ts = end_ts - 24 * 60 * 60;
+            start_ts = end_ts.saturating_sub(24 * 60 * 60);
         }
 
-        let duration = end_ts - start_ts;
-        if duration <= 24 * 60 * 60 {
-            let bucket_seconds: i64 = 60 * 60;
+        let duration = end_ts.saturating_sub(start_ts);
+        let use_day_buckets = match bucket_seconds {
+            Some(seconds) => seconds == DAY_BUCKET_SECONDS,
+            None => duration > 24 * 60 * 60,
+        };
+        if !use_day_buckets {
+            let bucket_seconds: i64 = bucket_seconds.unwrap_or(60 * 60);
+            // 向上取整且不做加法，避免极端时间戳下溢出。
             let mut bucket_count: i64 = if duration <= 0 {
                 1
             } else {
-                (duration + bucket_seconds - 1) / bucket_seconds
+                duration / bucket_seconds + i64::from(duration % bucket_seconds != 0)
             };
 
             if bucket_count < 1 {
                 bucket_count = 1;
+            }
+
+            if bucket_count > MAX_SUB_DAY_TREND_BUCKETS {
+                return Err(AppError::InvalidInput(format!(
+                    "趋势粒度过细: 需要 {bucket_count} 个桶，上限 {MAX_SUB_DAY_TREND_BUCKETS}"
+                )));
             }
 
             let mut extra_conditions: Vec<String> = Vec::new();
@@ -1368,9 +1413,12 @@ impl Database {
             let effective_filter =
                 effective_usage_log_filter_for_range(&conn, "l", Some(start_ts), Some(end_ts))?;
             let fresh_input = fresh_input_sql("l");
+            // 桶号在 SQL 里就夹到最后一桶（?4 = bucket_count - 1）：created_at == end_ts
+            // 且窗口恰为整桶时会算出越界桶号，必须和最后一桶一起 GROUP BY 聚合，
+            // 不能在 Rust 侧覆盖插入（否则最后一桶的数据会被越界行覆盖而少计）。
             let sql = format!(
                 "SELECT
-                    CAST((l.created_at - ?1) / ?3 AS INTEGER) as bucket_idx,
+                    MIN(CAST((l.created_at - ?1) / ?3 AS INTEGER), ?4) as bucket_idx,
                     COUNT(*) as request_count,
                     COALESCE(SUM(CAST(l.total_cost_usd AS REAL)), 0) as total_cost,
                     COALESCE(SUM({fresh_input} + l.output_tokens), 0) as total_tokens,
@@ -1409,32 +1457,29 @@ impl Database {
                 Box::new(start_ts),
                 Box::new(end_ts),
                 Box::new(bucket_seconds),
+                Box::new(bucket_count - 1),
             ];
             all_params.extend(extra_params);
             let param_refs: Vec<&dyn rusqlite::ToSql> =
                 all_params.iter().map(|p| p.as_ref()).collect();
             let rows = stmt.query_map(param_refs.as_slice(), row_mapper)?;
             for row in rows {
-                let (mut bucket_idx, stat) = row?;
-                if bucket_idx < 0 {
+                let (bucket_idx, stat) = row?;
+                if !(0..bucket_count).contains(&bucket_idx) {
                     continue;
-                }
-                if bucket_idx >= bucket_count {
-                    bucket_idx = bucket_count - 1;
                 }
                 map.insert(bucket_idx, stat);
             }
 
             // 按模型拆分的同桶 token 明细：仅「全部模型」时查询。桶号与上面的总量
-            // 查询同口径：created_at == end_ts 且窗口正好整小时的行会算出越界桶号，
-            // 并入最后一桶；负桶号忽略。
+            // 查询同口径（SQL 内已夹到最后一桶）；负桶号忽略。
             let mut models_by_bucket: HashMap<i64, Vec<ModelTokenUsage>> = HashMap::new();
             if model.is_none() {
                 let model_expr = effective_model_sql("l");
                 let real_total = real_total_tokens_sql("l");
                 let model_sql = format!(
                     "SELECT
-                        CAST((l.created_at - ?1) / ?3 AS INTEGER) as bucket_idx,
+                        MIN(CAST((l.created_at - ?1) / ?3 AS INTEGER), ?4) as bucket_idx,
                         {model_expr} as model,
                         COALESCE(SUM({real_total}), 0) as total_tokens
                     FROM proxy_request_logs l {detail_join}
@@ -1452,12 +1497,9 @@ impl Database {
                     ))
                 })?;
                 for row in model_rows {
-                    let (mut bucket_idx, model_name, total_tokens) = row?;
-                    if bucket_idx < 0 {
+                    let (bucket_idx, model_name, total_tokens) = row?;
+                    if !(0..bucket_count).contains(&bucket_idx) {
                         continue;
-                    }
-                    if bucket_idx >= bucket_count {
-                        bucket_idx = bucket_count - 1;
                     }
                     merge_model_token_usage(
                         models_by_bucket.entry(bucket_idx).or_default(),
@@ -6262,6 +6304,588 @@ mod tests {
             filtered.iter().map(|stat| stat.request_count).sum::<u64>(),
             2
         );
+
+        Ok(())
+    }
+
+    fn insert_trend_log(
+        conn: &Connection,
+        request_id: &str,
+        created_at: i64,
+    ) -> Result<(), AppError> {
+        insert_usage_log(
+            conn,
+            request_id,
+            "claude",
+            "p1",
+            "claude-sonnet-4-6",
+            "proxy",
+            created_at,
+            10,
+            5,
+            0,
+            0,
+            200,
+            "0.01",
+        )
+    }
+
+    fn request_counts(stats: &[DailyStats]) -> Vec<(usize, u64)> {
+        stats
+            .iter()
+            .enumerate()
+            .filter(|(_, stat)| stat.request_count > 0)
+            .map(|(idx, stat)| (idx, stat.request_count))
+            .collect()
+    }
+
+    #[test]
+    fn test_get_usage_trends_sub_day_bucket_seconds_10m_30m_1h() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        let start = local_ts(2026, 6, 10, 0, 0, 0);
+        let end = start + 3 * 3600;
+
+        {
+            let conn = lock_conn!(db.conn);
+            insert_trend_log(&conn, "b-0005", start + 5 * 60)?;
+            insert_trend_log(&conn, "b-0025", start + 25 * 60)?;
+            insert_trend_log(&conn, "b-0035", start + 35 * 60)?;
+            insert_trend_log(&conn, "b-0110", start + 70 * 60)?;
+            insert_trend_log(&conn, "b-0259", start + 3 * 3600 - 1)?;
+        }
+
+        let ten = db.get_usage_trends(
+            Some(start),
+            Some(end),
+            Some("claude"),
+            None,
+            None,
+            Some(600),
+        )?;
+        assert_eq!(ten.len(), 18);
+        assert_eq!(
+            request_counts(&ten),
+            vec![(0, 1), (2, 1), (3, 1), (7, 1), (17, 1)]
+        );
+        assert_eq!(
+            ten[1].date,
+            local_datetime_from_timestamp(start + 600)?.to_rfc3339()
+        );
+        assert_eq!(ten[0].total_tokens, 15);
+        assert_eq!(ten[0].models.len(), 1);
+        assert_eq!(ten[0].models[0].model, "claude-sonnet-4-6");
+
+        let thirty = db.get_usage_trends(
+            Some(start),
+            Some(end),
+            Some("claude"),
+            None,
+            None,
+            Some(1800),
+        )?;
+        assert_eq!(thirty.len(), 6);
+        assert_eq!(
+            request_counts(&thirty),
+            vec![(0, 2), (1, 1), (2, 1), (5, 1)]
+        );
+        assert_eq!(
+            thirty[1].date,
+            local_datetime_from_timestamp(start + 1800)?.to_rfc3339()
+        );
+
+        let hourly = db.get_usage_trends(
+            Some(start),
+            Some(end),
+            Some("claude"),
+            None,
+            None,
+            Some(3600),
+        )?;
+        assert_eq!(hourly.len(), 3);
+        assert_eq!(request_counts(&hourly), vec![(0, 3), (1, 1), (2, 1)]);
+        assert_eq!(hourly[0].total_tokens, 45);
+
+        // 所有粒度的请求总数一致。
+        for stats in [&ten, &thirty, &hourly] {
+            assert_eq!(stats.iter().map(|s| s.request_count).sum::<u64>(), 5);
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_usage_trends_none_matches_legacy_daily_trends() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        let short_start = local_ts(2026, 6, 10, 0, 0, 0);
+        let short_end = short_start + 6 * 3600;
+        let long_start = local_ts(2026, 6, 1, 0, 0, 0);
+        let long_end = long_start + 7 * 86_400;
+
+        {
+            let conn = lock_conn!(db.conn);
+            insert_trend_log(&conn, "legacy-1", short_start + 2 * 3600 + 10)?;
+            insert_trend_log(&conn, "legacy-2", long_start + 3 * 86_400 + 60)?;
+        }
+
+        for (start, end) in [(short_start, short_end), (long_start, long_end)] {
+            let legacy = db.get_daily_trends(Some(start), Some(end), None, None, None)?;
+            let default = db.get_usage_trends(Some(start), Some(end), None, None, None, None)?;
+            assert_eq!(legacy.len(), default.len());
+            for (a, b) in legacy.iter().zip(default.iter()) {
+                assert_eq!(a.date, b.date);
+                assert_eq!(a.request_count, b.request_count);
+                assert_eq!(a.total_tokens, b.total_tokens);
+            }
+        }
+
+        // 缺省行为：<=24h 按小时，>24h 按天。
+        assert_eq!(
+            db.get_usage_trends(Some(short_start), Some(short_end), None, None, None, None)?
+                .len(),
+            6
+        );
+        assert_eq!(
+            db.get_usage_trends(Some(long_start), Some(long_end), None, None, None, None)?
+                .len(),
+            8
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_usage_trends_seven_days_hourly() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        let start = local_ts(2026, 6, 1, 0, 0, 0);
+        let end = start + 7 * 86_400;
+
+        {
+            let conn = lock_conn!(db.conn);
+            // 第 3 天（0 起）05:30 -> 桶 3 * 24 + 5。
+            insert_trend_log(&conn, "week-1", start + 3 * 86_400 + 5 * 3600 + 30 * 60)?;
+            insert_trend_log(&conn, "week-2", start + 3 * 86_400 + 5 * 3600 + 59 * 60)?;
+            // 最后一小时的最后一秒 -> 桶 167。
+            insert_trend_log(&conn, "week-3", end - 1)?;
+        }
+
+        let stats = db.get_usage_trends(
+            Some(start),
+            Some(end),
+            Some("claude"),
+            None,
+            None,
+            Some(3600),
+        )?;
+        assert_eq!(stats.len(), 7 * 24);
+        assert_eq!(request_counts(&stats), vec![(77, 2), (167, 1)]);
+        assert_eq!(stats[77].total_tokens, 30);
+        assert_eq!(stats[77].models.len(), 1);
+        assert_eq!(
+            stats[78].date,
+            local_datetime_from_timestamp(start + 78 * 3600)?.to_rfc3339()
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_usage_trends_explicit_day_bucket_merges_rollups() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        let start = local_ts(2024, 3, 1, 12, 0, 0);
+        let end = local_ts(2024, 3, 3, 12, 0, 0);
+
+        {
+            let conn = lock_conn!(db.conn);
+            insert_trend_log(&conn, "day-1-detail", local_ts(2024, 3, 1, 13, 0, 0))?;
+            insert_trend_log(&conn, "day-3-detail", local_ts(2024, 3, 3, 10, 0, 0))?;
+            conn.execute(
+                "INSERT INTO usage_daily_rollups (
+                    date, app_type, provider_id, model,
+                    request_count, success_count, input_tokens, output_tokens,
+                    cache_read_tokens, cache_creation_tokens, total_cost_usd, avg_latency_ms
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                params![
+                    "2024-03-02",
+                    "claude",
+                    "p1",
+                    "claude-sonnet-4-6",
+                    4,
+                    4,
+                    400,
+                    200,
+                    0,
+                    0,
+                    "0.40",
+                    120
+                ],
+            )?;
+        }
+
+        let stats = db.get_usage_trends(
+            Some(start),
+            Some(end),
+            Some("claude"),
+            None,
+            None,
+            Some(86_400),
+        )?;
+        assert_eq!(stats.len(), 3);
+        assert_eq!(stats[0].request_count, 1);
+        assert_eq!(stats[1].request_count, 4);
+        assert_eq!(stats[1].total_tokens, 600);
+        assert_eq!(stats[2].request_count, 1);
+        assert_eq!(
+            stats[1].date,
+            local_day_start_rfc3339(NaiveDate::from_ymd_opt(2024, 3, 2).unwrap())
+        );
+
+        // 显式日桶与缺省（>24h）结果一致。
+        let default =
+            db.get_usage_trends(Some(start), Some(end), Some("claude"), None, None, None)?;
+        assert_eq!(request_counts(&stats), request_counts(&default),);
+
+        // <=24h 的窗口显式要求日桶时，也走日桶分支（而不是 24 个小时桶）。
+        let short_start = local_ts(2024, 3, 3, 0, 0, 0);
+        let short_end = local_ts(2024, 3, 3, 12, 0, 0);
+        let short = db.get_usage_trends(
+            Some(short_start),
+            Some(short_end),
+            Some("claude"),
+            None,
+            None,
+            Some(86_400),
+        )?;
+        assert_eq!(short.len(), 1);
+        assert_eq!(short[0].request_count, 1);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_usage_trends_rejects_invalid_bucket_seconds() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        let start = local_ts(2026, 6, 10, 0, 0, 0);
+        let end = start + 3600;
+
+        for invalid in [i64::MIN, -600, -1, 0, 1, 60, 599, 900, 7200, 3601, 604_800] {
+            let result =
+                db.get_usage_trends(Some(start), Some(end), None, None, None, Some(invalid));
+            assert!(
+                matches!(result, Err(AppError::InvalidInput(_))),
+                "bucket_seconds={invalid} should be InvalidInput, got {result:?}"
+            );
+        }
+
+        for valid in [600, 1800, 3600, 86_400] {
+            assert!(db
+                .get_usage_trends(Some(start), Some(end), None, None, None, Some(valid))
+                .is_ok());
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_usage_trends_sub_day_bucket_limit() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        let start = local_ts(2026, 1, 1, 0, 0, 0);
+
+        // 30 天 × 10 分钟 = 4320，仍可用。
+        let thirty_days = db.get_usage_trends(
+            Some(start),
+            Some(start + 30 * 86_400),
+            None,
+            None,
+            None,
+            Some(600),
+        )?;
+        assert_eq!(thirty_days.len(), 4320);
+
+        // 恰好 5000 个桶可用，5001 个桶被拒绝。
+        let at_limit = db.get_usage_trends(
+            Some(start),
+            Some(start + 5000 * 600),
+            None,
+            None,
+            None,
+            Some(600),
+        )?;
+        assert_eq!(at_limit.len(), 5000);
+
+        let over_limit = db.get_usage_trends(
+            Some(start),
+            Some(start + 5000 * 600 + 1),
+            None,
+            None,
+            None,
+            Some(600),
+        );
+        assert!(matches!(over_limit, Err(AppError::InvalidInput(_))));
+
+        let forty_days = db.get_usage_trends(
+            Some(start),
+            Some(start + 40 * 86_400),
+            None,
+            None,
+            None,
+            Some(600),
+        );
+        assert!(matches!(forty_days, Err(AppError::InvalidInput(_))));
+
+        // 日桶不受子日桶数量限制。
+        let long_day = db.get_usage_trends(
+            Some(start),
+            Some(start + 400 * 86_400),
+            None,
+            None,
+            None,
+            Some(86_400),
+        )?;
+        assert_eq!(long_day.len(), 401);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_usage_trends_end_boundary_merges_into_last_bucket() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        let start = local_ts(2026, 6, 10, 0, 0, 0);
+        // 窗口恰为整桶：created_at == end_ts 的行会算出越界桶号，必须与最后一桶合并。
+        let end = start + 3600;
+
+        {
+            let conn = lock_conn!(db.conn);
+            insert_trend_log(&conn, "edge-last", end - 30)?;
+            insert_usage_log(
+                &conn,
+                "edge-end",
+                "claude",
+                "p1",
+                "claude-opus-4-7",
+                "proxy",
+                end,
+                20,
+                10,
+                0,
+                0,
+                200,
+                "0.02",
+            )?;
+        }
+
+        for (bucket, expected_len) in [(600_i64, 6_usize), (1800, 2), (3600, 1)] {
+            let stats = db.get_usage_trends(
+                Some(start),
+                Some(end),
+                Some("claude"),
+                None,
+                None,
+                Some(bucket),
+            )?;
+            assert_eq!(stats.len(), expected_len, "bucket={bucket}");
+            let last = stats.last().unwrap();
+            assert_eq!(
+                last.request_count, 2,
+                "bucket={bucket}: 两行都应计入最后一桶"
+            );
+            assert_eq!(last.total_tokens, 45, "bucket={bucket}");
+            assert_eq!(
+                last.models.iter().map(|m| m.total_tokens).sum::<u64>(),
+                45,
+                "bucket={bucket}: 模型拆分与总量一致"
+            );
+            assert_eq!(last.models.len(), 2, "bucket={bucket}");
+            assert_eq!(
+                stats.iter().map(|s| s.request_count).sum::<u64>(),
+                2,
+                "bucket={bucket}: 不多计也不少计"
+            );
+        }
+
+        // 缺省（<=24h 按小时）路径同样合并，旧接口一致。
+        let legacy = db.get_daily_trends(Some(start), Some(end), Some("claude"), None, None)?;
+        assert_eq!(legacy.len(), 1);
+        assert_eq!(legacy[0].request_count, 2);
+
+        // 窗口外（end 之后、start 之前）的行不计入。
+        {
+            let conn = lock_conn!(db.conn);
+            insert_trend_log(&conn, "edge-after", end + 1)?;
+            insert_trend_log(&conn, "edge-before", start - 1)?;
+        }
+        let stats = db.get_usage_trends(
+            Some(start),
+            Some(end),
+            Some("claude"),
+            None,
+            None,
+            Some(600),
+        )?;
+        assert_eq!(stats.iter().map(|s| s.request_count).sum::<u64>(), 2);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_usage_trends_sub_day_filters_bind_after_numbered_params() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        let start = local_ts(2026, 6, 10, 0, 0, 0);
+        let end = start + 2 * 3600;
+
+        {
+            let conn = lock_conn!(db.conn);
+            insert_trend_log(&conn, "f-sonnet", start + 15 * 60)?;
+            insert_usage_log(
+                &conn,
+                "f-opus",
+                "claude",
+                "p1",
+                "claude-opus-4-7",
+                "proxy",
+                start + 45 * 60,
+                100,
+                50,
+                0,
+                0,
+                200,
+                "0.10",
+            )?;
+            insert_usage_log(
+                &conn,
+                "f-codex",
+                "codex",
+                "p2",
+                "gpt-5.5",
+                "proxy",
+                start + 15 * 60,
+                7,
+                3,
+                0,
+                0,
+                200,
+                "0.01",
+            )?;
+            // 会话占位行：Provider 展示名走 CASE 映射为 "Claude (Session)"。
+            insert_usage_log(
+                &conn,
+                "f-session",
+                "claude",
+                "_session",
+                "claude-sonnet-4-6",
+                "session_log",
+                start + 95 * 60,
+                33,
+                11,
+                0,
+                0,
+                200,
+                "0.03",
+            )?;
+        }
+
+        for bucket in [600_i64, 1800, 3600] {
+            // app_type 过滤：codex 行被排除。
+            let claude = db.get_usage_trends(
+                Some(start),
+                Some(end),
+                Some("claude"),
+                None,
+                None,
+                Some(bucket),
+            )?;
+            assert_eq!(claude.iter().map(|s| s.request_count).sum::<u64>(), 3);
+
+            // 模型过滤：只剩 opus；指定模型时不返回模型拆分。
+            let opus = db.get_usage_trends(
+                Some(start),
+                Some(end),
+                Some("claude"),
+                None,
+                Some("claude-opus-4-7"),
+                Some(bucket),
+            )?;
+            assert_eq!(opus.iter().map(|s| s.request_count).sum::<u64>(), 1);
+            assert_eq!(opus.iter().map(|s| s.total_tokens).sum::<u64>(), 150);
+            let opus_idx = ((45 * 60) / bucket) as usize;
+            assert_eq!(opus[opus_idx].request_count, 1, "bucket={bucket}");
+            assert!(opus.iter().all(|s| s.models.is_empty()));
+
+            // Provider 过滤（需要 providers JOIN）+ 模型过滤组合。
+            let session = db.get_usage_trends(
+                Some(start),
+                Some(end),
+                Some("claude"),
+                Some("Claude (Session)"),
+                Some("claude-sonnet-4-6"),
+                Some(bucket),
+            )?;
+            assert_eq!(session.iter().map(|s| s.request_count).sum::<u64>(), 1);
+            let session_idx = ((95 * 60) / bucket) as usize;
+            assert_eq!(session[session_idx].request_count, 1, "bucket={bucket}");
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_usage_trends_day_bucket_rollup_model_breakdown_no_double_count(
+    ) -> Result<(), AppError> {
+        let db = Database::memory()?;
+        let start = local_ts(2024, 3, 1, 0, 0, 0);
+        let end = local_ts(2024, 3, 3, 23, 59, 59);
+
+        {
+            let conn = lock_conn!(db.conn);
+            insert_trend_log(&conn, "r-day3", local_ts(2024, 3, 3, 9, 0, 0))?;
+            conn.execute(
+                "INSERT INTO usage_daily_rollups (
+                    date, app_type, provider_id, model,
+                    request_count, success_count, input_tokens, output_tokens,
+                    cache_read_tokens, cache_creation_tokens, total_cost_usd, avg_latency_ms
+                ) VALUES
+                ('2024-03-01', 'claude', 'p1', 'claude-sonnet-4-6', 2, 2, 20, 10, 0, 0, '0.02', 100),
+                ('2024-03-02', 'claude', 'p1', 'claude-sonnet-4-6', 3, 3, 30, 15, 0, 0, '0.03', 100),
+                ('2024-03-02', 'claude', 'p1', 'claude-opus-4-7', 1, 1, 100, 50, 0, 0, '0.10', 100),
+                ('2024-02-29', 'claude', 'p1', 'claude-sonnet-4-6', 9, 9, 90, 45, 0, 0, '0.09', 100)",
+                [],
+            )?;
+        }
+
+        let stats = db.get_usage_trends(
+            Some(start),
+            Some(end),
+            Some("claude"),
+            None,
+            None,
+            Some(86_400),
+        )?;
+        assert_eq!(stats.len(), 3);
+        assert_eq!(
+            stats.iter().map(|s| s.request_count).collect::<Vec<_>>(),
+            vec![2, 4, 1],
+            "窗口外的 2024-02-29 rollup 不计入；各天只计一次"
+        );
+        assert_eq!(stats[1].total_tokens, 195);
+        assert_eq!(stats[1].models.len(), 2);
+        assert_eq!(stats[1].models[0].model, "claude-opus-4-7");
+        assert_eq!(
+            stats[1].models.iter().map(|m| m.total_tokens).sum::<u64>(),
+            195
+        );
+        assert_eq!(stats[1].total_cost, "0.130000");
+
+        // 子日桶只读明细（契约：600/1800/3600 走明细日志桶分支），不会把 rollup 再叠加进来。
+        let hourly = db.get_usage_trends(
+            Some(start),
+            Some(end),
+            Some("claude"),
+            None,
+            None,
+            Some(3600),
+        )?;
+        assert_eq!(hourly.len(), 72);
+        assert_eq!(hourly.iter().map(|s| s.request_count).sum::<u64>(), 1);
+        assert_eq!(hourly[48 + 9].request_count, 1);
 
         Ok(())
     }
