@@ -396,7 +396,7 @@ describe("buildUsageTrendChartData granularity labels", () => {
   const startDate = Math.floor(new Date(2026, 8, 30).getTime() / 1000);
   const endDate = startDate + 24 * 60 * 60;
 
-  it("shows hour:minute for sub-day buckets (10m / 30m / 1h)", () => {
+  it("shows hour:minute for sub-day buckets (10m / 30m / 1h / 12h)", () => {
     const points = buildUsageTrendChartData([at(10, 10), at(10, 30)], {
       isHourly: true,
       dateLocale: "en-GB",

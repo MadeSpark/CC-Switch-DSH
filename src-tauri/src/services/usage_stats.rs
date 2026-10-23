@@ -663,8 +663,8 @@ pub(crate) struct LogCountCache {
 
 const LOG_COUNT_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(60);
 
-/// 趋势图允许的桶粒度（秒）：10 分钟 / 30 分钟 / 1 小时 / 1 天。
-const ALLOWED_TREND_BUCKET_SECONDS: [i64; 4] = [600, 1800, 3600, 86_400];
+/// 趋势图允许的桶粒度（秒）：10 分钟 / 30 分钟 / 1 小时 / 12 小时 / 1 天。
+const ALLOWED_TREND_BUCKET_SECONDS: [i64; 5] = [600, 1800, 3600, 43_200, 86_400];
 const DAY_BUCKET_SECONDS: i64 = 86_400;
 /// 子日桶数量上限（30 天 × 10 分钟 = 4320，仍可用）。
 const MAX_SUB_DAY_TREND_BUCKETS: i64 = 5000;
@@ -1333,7 +1333,7 @@ impl Database {
     ///
     /// - `bucket_seconds = None`：旧行为，跨度 <=24h 按小时，否则按天。
     /// - `Some(86400)`：日桶（明细 + usage_daily_rollups）。
-    /// - `Some(600 | 1800 | 3600)`：按明细日志分桶，桶起点为窗口起点。
+    /// - `Some(600 | 1800 | 3600 | 43200)`：按明细日志分桶，桶起点为窗口起点。
     /// - 其他值返回 `InvalidInput`；子日桶数超过 `MAX_SUB_DAY_TREND_BUCKETS` 同样返回 `InvalidInput`。
     pub fn get_usage_trends(
         &self,
@@ -1347,7 +1347,7 @@ impl Database {
         if let Some(seconds) = bucket_seconds {
             if !ALLOWED_TREND_BUCKET_SECONDS.contains(&seconds) {
                 return Err(AppError::InvalidInput(format!(
-                    "不支持的趋势粒度: {seconds} 秒（仅支持 600/1800/3600/86400）"
+                    "不支持的趋势粒度: {seconds} 秒（仅支持 600/1800/3600/43200/86400）"
                 )));
             }
         }
@@ -6414,6 +6414,103 @@ mod tests {
     }
 
     #[test]
+    fn test_get_usage_trends_twelve_hour_buckets_cross_days() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        let start = local_ts(2026, 6, 10, 0, 0, 0);
+        let week_end = start + 7 * 86_400;
+
+        {
+            let conn = lock_conn!(db.conn);
+            insert_trend_log(&conn, "h12-0100", start + 3600)?;
+            // 第一个 12 小时桶的最后一秒仍在桶 0。
+            insert_trend_log(&conn, "h12-1159", start + 12 * 3600 - 1)?;
+            // 正好 12:00 落到桶 1。
+            insert_trend_log(&conn, "h12-1200", start + 12 * 3600)?;
+            insert_trend_log(&conn, "h12-2300", start + 23 * 3600)?;
+            // 第 3 天（0 起）13:00 -> 桶 3 * 2 + 1 = 7。
+            insert_trend_log(&conn, "h12-d3", start + 3 * 86_400 + 13 * 3600)?;
+            // 7 天窗口最后一秒 -> 桶 13。
+            insert_trend_log(&conn, "h12-last", week_end - 1)?;
+        }
+
+        let six_hours = db.get_usage_trends(
+            Some(start),
+            Some(start + 6 * 3600),
+            Some("claude"),
+            None,
+            None,
+            Some(43_200),
+        )?;
+        assert_eq!(six_hours.len(), 1);
+        assert_eq!(request_counts(&six_hours), vec![(0, 1)]);
+        assert_eq!(
+            six_hours[0].date,
+            local_datetime_from_timestamp(start)?.to_rfc3339()
+        );
+
+        let one_day = db.get_usage_trends(
+            Some(start),
+            Some(start + 86_400),
+            Some("claude"),
+            None,
+            None,
+            Some(43_200),
+        )?;
+        assert_eq!(one_day.len(), 2);
+        assert_eq!(request_counts(&one_day), vec![(0, 2), (1, 2)]);
+        assert_eq!(
+            one_day[1].date,
+            local_datetime_from_timestamp(start + 12 * 3600)?.to_rfc3339()
+        );
+        assert_eq!(one_day[0].total_tokens, 30);
+        assert_eq!(one_day[0].models.len(), 1);
+        assert_eq!(one_day[0].models[0].model, "claude-sonnet-4-6");
+
+        let week = db.get_usage_trends(
+            Some(start),
+            Some(week_end),
+            Some("claude"),
+            None,
+            None,
+            Some(43_200),
+        )?;
+        assert_eq!(week.len(), 14);
+        assert_eq!(request_counts(&week), vec![(0, 2), (1, 2), (7, 1), (13, 1)]);
+        // 跨天：桶 2 从第二天 00:00 开始，桶 7 从第 3 天 12:00 开始。
+        assert_eq!(
+            week[2].date,
+            local_datetime_from_timestamp(start + 86_400)?.to_rfc3339()
+        );
+        assert_eq!(
+            week[7].date,
+            local_datetime_from_timestamp(start + 3 * 86_400 + 12 * 3600)?.to_rfc3339()
+        );
+
+        // 同一窗口下 1h / 12h / 1d 的请求总数一致。
+        let hourly = db.get_usage_trends(
+            Some(start),
+            Some(week_end),
+            Some("claude"),
+            None,
+            None,
+            Some(3600),
+        )?;
+        let daily = db.get_usage_trends(
+            Some(start),
+            Some(week_end),
+            Some("claude"),
+            None,
+            None,
+            Some(86_400),
+        )?;
+        for stats in [&hourly, &week, &daily] {
+            assert_eq!(stats.iter().map(|s| s.request_count).sum::<u64>(), 6);
+        }
+
+        Ok(())
+    }
+
+    #[test]
     fn test_get_usage_trends_none_matches_legacy_daily_trends() -> Result<(), AppError> {
         let db = Database::memory()?;
         let short_start = local_ts(2026, 6, 10, 0, 0, 0);
@@ -6576,7 +6673,7 @@ mod tests {
             );
         }
 
-        for valid in [600, 1800, 3600, 86_400] {
+        for valid in [600, 1800, 3600, 43_200, 86_400] {
             assert!(db
                 .get_usage_trends(Some(start), Some(end), None, None, None, Some(valid))
                 .is_ok());
@@ -6673,7 +6770,7 @@ mod tests {
             )?;
         }
 
-        for (bucket, expected_len) in [(600_i64, 6_usize), (1800, 2), (3600, 1)] {
+        for (bucket, expected_len) in [(600_i64, 6_usize), (1800, 2), (3600, 1), (43_200, 1)] {
             let stats = db.get_usage_trends(
                 Some(start),
                 Some(end),
@@ -6783,7 +6880,7 @@ mod tests {
             )?;
         }
 
-        for bucket in [600_i64, 1800, 3600] {
+        for bucket in [600_i64, 1800, 3600, 43_200] {
             // app_type 过滤：codex 行被排除。
             let claude = db.get_usage_trends(
                 Some(start),
@@ -6874,7 +6971,7 @@ mod tests {
         );
         assert_eq!(stats[1].total_cost, "0.130000");
 
-        // 子日桶只读明细（契约：600/1800/3600 走明细日志桶分支），不会把 rollup 再叠加进来。
+        // 子日桶只读明细（契约：600/1800/3600/43200 走明细日志桶分支），不会把 rollup 再叠加进来。
         let hourly = db.get_usage_trends(
             Some(start),
             Some(end),
@@ -6886,6 +6983,22 @@ mod tests {
         assert_eq!(hourly.len(), 72);
         assert_eq!(hourly.iter().map(|s| s.request_count).sum::<u64>(), 1);
         assert_eq!(hourly[48 + 9].request_count, 1);
+
+        let twelve_hourly = db.get_usage_trends(
+            Some(start),
+            Some(end),
+            Some("claude"),
+            None,
+            None,
+            Some(43_200),
+        )?;
+        assert_eq!(twelve_hourly.len(), 6);
+        assert_eq!(
+            twelve_hourly.iter().map(|s| s.request_count).sum::<u64>(),
+            1,
+            "12h 也是子日桶，不得叠加 rollup"
+        );
+        assert_eq!(twelve_hourly[4].request_count, 1);
 
         Ok(())
     }

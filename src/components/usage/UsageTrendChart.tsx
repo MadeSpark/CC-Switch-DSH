@@ -44,7 +44,7 @@ interface UsageTrendChartProps {
   /** undefined = 全部模型；有值 = 单个模型（tooltip 不再拆模型区）。 */
   model?: string;
   /**
-   * 趋势桶的时间粒度。10m / 30m / 1h 用「日期 + 时:分」标签，1d 只显示日期。
+   * 趋势桶的时间粒度。10m / 30m / 1h / 12h 用「日期 + 时:分」标签，1d 只显示日期。
    * 缺省时保持旧行为：不发 bucketSeconds，跨度 ≤ 24h 按小时、否则按天。
    */
   granularity?: UsageGranularity;

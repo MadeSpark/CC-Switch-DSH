@@ -23,18 +23,20 @@ import {
 const DAY = 24 * 60 * 60;
 
 describe("usage granularity mapping", () => {
-  it("lists the four options from fine to coarse with their bucket seconds", () => {
-    expect(USAGE_GRANULARITIES).toEqual(["10m", "30m", "1h", "1d"]);
+  it("lists the five options from fine to coarse with their bucket seconds", () => {
+    expect(USAGE_GRANULARITIES).toEqual(["10m", "30m", "1h", "12h", "1d"]);
     expect(USAGE_GRANULARITY_SECONDS).toEqual({
       "10m": 600,
       "30m": 1800,
       "1h": 3600,
+      "12h": 43200,
       "1d": 86400,
     });
     expect(USAGE_GRANULARITIES.map(getUsageGranularitySeconds)).toEqual([
-      600, 1800, 3600, 86400,
+      600, 1800, 3600, 43200, 86400,
     ]);
     expect(USAGE_GRANULARITIES.map(isSubDayUsageGranularity)).toEqual([
+      true,
       true,
       true,
       true,
@@ -45,7 +47,7 @@ describe("usage granularity mapping", () => {
   it.each([
     ["today", "30m"],
     ["1d", "1h"],
-    ["7d", "1h"],
+    ["7d", "12h"],
     ["14d", "1d"],
     ["30d", "1d"],
   ] as const)("defaults %s to %s", (preset, expected) => {
@@ -141,9 +143,13 @@ describe("useUsageTrends granularity", () => {
     await waitFor(() => expect(trendCalls()).toHaveLength(2));
     expect(trendCalls()[1][1]).toMatchObject({ bucketSeconds: 600 });
 
-    rerender({ granularity: "1d" });
+    rerender({ granularity: "12h" });
     await waitFor(() => expect(trendCalls()).toHaveLength(3));
-    expect(trendCalls()[2][1]).toMatchObject({ bucketSeconds: 86400 });
+    expect(trendCalls()[2][1]).toMatchObject({ bucketSeconds: 43200 });
+
+    rerender({ granularity: "1d" });
+    await waitFor(() => expect(trendCalls()).toHaveLength(4));
+    expect(trendCalls()[3][1]).toMatchObject({ bucketSeconds: 86400 });
   });
 
   it("omits bucketSeconds when no granularity is given (heatmap)", async () => {
@@ -158,7 +164,7 @@ describe("useUsageTrends granularity", () => {
 
 describe("usage.granularity locale keys", () => {
   const locales = ["zh", "zh-TW", "en", "ja", "tr"] as const;
-  const expected = ["10m", "1d", "1h", "30m", "label", "title"];
+  const expected = ["10m", "12h", "1d", "1h", "30m", "label", "title"];
 
   it.each(locales)("%s parses and has every granularity key", (locale) => {
     const file = path.resolve(

@@ -72,6 +72,7 @@ export const USAGE_GRANULARITIES: readonly UsageGranularity[] = [
   "10m",
   "30m",
   "1h",
+  "12h",
   "1d",
 ];
 
@@ -80,6 +81,7 @@ export const USAGE_GRANULARITY_SECONDS: Record<UsageGranularity, number> = {
   "10m": 600,
   "30m": 1800,
   "1h": 3600,
+  "12h": 12 * 3600,
   "1d": DAY_SECONDS,
 };
 
@@ -89,7 +91,7 @@ export function getUsageGranularitySeconds(
   return USAGE_GRANULARITY_SECONDS[granularity];
 }
 
-/** 小于一天的粒度：图表用「日期 + 时:分」标签；1d 只显示日期 */
+/** 小于一天的粒度（10m/30m/1h/12h）：图表用「日期 + 时:分」标签；1d 只显示日期 */
 export function isSubDayUsageGranularity(
   granularity: UsageGranularity,
 ): boolean {
@@ -98,7 +100,7 @@ export function isSubDayUsageGranularity(
 
 /**
  * 时间范围对应的默认粒度。切换任何时间范围（预设或自定义日历）都按它重置。
- * today → 30m；1d / 7d → 1h；14d / 30d → 1d；
+ * today → 30m；1d → 1h；7d → 12h；14d / 30d → 1d；
  * custom 跨度 > 7 天 → 1d，否则 1h；all 不显示粒度控件，兜底 1d。
  */
 export function getDefaultUsageGranularity(
@@ -109,8 +111,9 @@ export function getDefaultUsageGranularity(
     case "today":
       return "30m";
     case "1d":
-    case "7d":
       return "1h";
+    case "7d":
+      return "12h";
     case "14d":
     case "30d":
     case "all":

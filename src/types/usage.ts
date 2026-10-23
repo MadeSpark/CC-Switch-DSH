@@ -204,8 +204,8 @@ export type UsageRangePreset =
   | "all"
   | "custom";
 
-/** 用量趋势图的时间粒度：10 分钟 / 30 分钟 / 1 小时 / 1 天 */
-export type UsageGranularity = "10m" | "30m" | "1h" | "1d";
+/** 用量趋势图的时间粒度：10 分钟 / 30 分钟 / 1 小时 / 12 小时 / 1 天 */
+export type UsageGranularity = "10m" | "30m" | "1h" | "12h" | "1d";
 
 export interface UsageRangeSelection {
   preset: UsageRangePreset;

@@ -74,7 +74,7 @@ describe("UsageTrendChart granularity", () => {
     );
   });
 
-  it.each(["10m", "30m", "1h"] as const)(
+  it.each(["10m", "30m", "1h", "12h"] as const)(
     "renders hour:minute axis labels for %s",
     (granularity) => {
       const { container } = renderChart(granularity);

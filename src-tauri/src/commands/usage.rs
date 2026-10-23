@@ -74,7 +74,7 @@ pub async fn get_usage_summary_by_app(
     .await
 }
 
-/// 获取趋势；`bucket_seconds` 缺省时保持旧行为，仅允许 600/1800/3600/86400
+/// 获取趋势；`bucket_seconds` 缺省时保持旧行为，仅允许 600/1800/3600/43200/86400
 #[tauri::command]
 pub async fn get_usage_trends(
     state: State<'_, AppState>,

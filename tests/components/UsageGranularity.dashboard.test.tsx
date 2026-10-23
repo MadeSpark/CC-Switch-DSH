@@ -210,7 +210,7 @@ describe("UsageDashboard granularity", () => {
 
   it.each([
     ["1d", "1h"],
-    ["7d", "1h"],
+    ["7d", "12h"],
     ["14d", "1d"],
     ["30d", "1d"],
     ["custom-short", "1h"],
@@ -228,7 +228,7 @@ describe("UsageDashboard granularity", () => {
     expect(lastChartGranularity()).toBe(expected);
   });
 
-  it("lists all four options and keeps a manual pick until the range changes", async () => {
+  it("lists all five options and keeps a manual pick until the range changes", async () => {
     const user = userEvent.setup();
     renderDashboard();
     await screen.findByTestId("usage-trend");
@@ -239,6 +239,7 @@ describe("UsageDashboard granularity", () => {
       "usage.granularity.10m",
       "usage.granularity.30m",
       "usage.granularity.1h",
+      "usage.granularity.12h",
       "usage.granularity.1d",
     ]);
     await user.click(items[0]);
@@ -253,8 +254,8 @@ describe("UsageDashboard granularity", () => {
 
     // 切换时间范围才重置
     await user.click(screen.getByRole("button", { name: "pick-7d" }));
-    expect(granularityButton()).toHaveTextContent("usage.granularity.1h");
-    expect(lastChartGranularity()).toBe("1h");
+    expect(granularityButton()).toHaveTextContent("usage.granularity.12h");
+    expect(lastChartGranularity()).toBe("12h");
 
     await pickGranularity(user, "1d");
     expect(lastChartGranularity()).toBe("1d");
