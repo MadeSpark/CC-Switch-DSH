@@ -1427,6 +1427,12 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            commands::list_custom_apps,
+            commands::create_custom_app,
+            commands::update_custom_app,
+            commands::delete_custom_app,
+            commands::regenerate_custom_app_key,
+            commands::list_custom_app_models,
             commands::get_providers,
             commands::get_current_provider,
             commands::add_provider,

@@ -1,4 +1,44 @@
 {
+  "customApps": {
+    "title": "カスタムアプリ",
+    "add": "アプリを追加",
+    "help": "カスタムアプリはローカルの集約ルート経由でリクエストを転送します：API は OpenAI 互換、モデルは設定済みのプロバイダーから集約され、アドレスはローカルルートのポートに従います。",
+    "empty": "カスタムアプリはまだありません。右上の「アプリを追加」から作成してください。",
+    "edit": "編集",
+    "delete": "削除",
+    "deleteTitle": "「{{name}}」を削除",
+    "deleteBody": "削除すると「{{name}}」を参照しているクライアントはすぐに使えなくなり、元に戻せません。削除しますか？",
+    "apiAddress": "API アドレス",
+    "addressHint": "エンドポイントは OpenAI 互換形式です：/custom/{{appId}}/v1。ポートはローカルルートに応じて変わるため、表示中の値が現在の値です。",
+    "proxyNotRunning": "先にローカルルートを起動してください",
+    "copyAddress": "API アドレスをコピー",
+    "apiKey": "API Key",
+    "copyKey": "API Key をコピー",
+    "resetKey": "API Key を再生成",
+    "modelsTitle": "集約モデル（{{count}}）",
+    "modelsLoading": "モデルを読み込み中…",
+    "modelsEmpty": "集約できるモデルがありません：先にプロバイダーページでモデルを有効化・設定してください。",
+    "dialog": {
+      "createTitle": "カスタムアプリを追加",
+      "editTitle": "カスタムアプリを編集",
+      "nameLabel": "名前",
+      "namePlaceholder": "例：マイ集約エンドポイント",
+      "iconLabel": "アイコン",
+      "routingNote": "カスタムアプリは常に集約ルート経由です：モデルは有効なプロバイダーから集約され、単一プロバイダーへの直接接続には対応していません。"
+    },
+    "toast": {
+      "created": "「{{name}}」を作成しました",
+      "createFailed": "作成に失敗しました：{{error}}",
+      "updated": "「{{name}}」を保存しました",
+      "updateFailed": "保存に失敗しました：{{error}}",
+      "deleted": "「{{name}}」を削除しました",
+      "deleteFailed": "削除に失敗しました：{{error}}",
+      "keyRegenerated": "「{{name}}」の API Key を再生成しました",
+      "keyRegenerateFailed": "API Key の再生成に失敗しました：{{error}}",
+      "addressCopied": "API アドレスをコピーしました",
+      "keyCopied": "API Key をコピーしました"
+    }
+  },
   "app": {
     "title": "CC Switch",
     "description": "Claude Code・Codex・Gemini CLI のためのオールインワンアシスタント"
@@ -4164,6 +4204,7 @@
     "refresh": "更新"
   },
   "nav": {
+    "customApps": "カスタムアプリ",
     "mainLabel": "メインナビゲーション",
     "skipToContent": "メインコンテンツへスキップ",
     "expandSidebar": "サイドバーを展開",

@@ -9,7 +9,7 @@
 //! a direct (non-proxied) CLI request.
 
 use super::{
-    dsh_relay,
+    custom_apps, dsh_relay,
     failover_switch::FailoverSwitchManager,
     handlers,
     log_codes::srv as log_srv,
@@ -299,6 +299,15 @@ impl ProxyServer {
 
     fn build_router(&self) -> Router {
         Router::new()
+            // 自定义应用聚合路由：没有全局 /v1 兜底，未列出的 /custom 路径自然 404。
+            .route(
+                "/custom/:app_id/v1/models",
+                get(custom_apps::handle_custom_app_models),
+            )
+            .route(
+                "/custom/:app_id/v1/chat/completions",
+                post(custom_apps::handle_custom_app_chat_completions),
+            )
             // 健康检查
             .route("/health", get(handlers::health_check))
             .route("/status", get(handlers::get_status))

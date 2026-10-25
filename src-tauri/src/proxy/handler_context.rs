@@ -58,6 +58,10 @@ pub struct RequestContext {
     pub tag: &'static str,
     /// 应用类型字符串（如 "claude"、"codex"、"gemini"）
     pub app_type_str: &'static str,
+    /// 覆盖 usage 归因的 app_type。自定义应用使用 custom-<uuid>，固定应用保持 None。
+    pub usage_app_type: Option<String>,
+    /// 覆盖 usage 的 model。自定义应用必须记录实际发往上游的模型名。
+    pub usage_model_override: Option<String>,
     /// 应用类型（预留，目前通过 app_type_str 使用）
     #[allow(dead_code)]
     pub app_type: AppType,
@@ -214,6 +218,8 @@ impl RequestContext {
             outbound_model: None,
             tag,
             app_type_str,
+            usage_app_type: None,
+            usage_model_override: None,
             app_type,
             session_id,
             session_client_provided: session_result.client_provided,
@@ -222,6 +228,63 @@ impl RequestContext {
             copilot_optimizer_config,
             is_stack,
         })
+    }
+
+    /// 为自定义应用构造请求上下文：provider 已由模型路由精确选定，不再经过故障转移队列。
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn for_custom_app(
+        state: &ProxyState,
+        body: &serde_json::Value,
+        headers: &HeaderMap,
+        app_type: AppType,
+        provider: Provider,
+        request_model: String,
+        upstream_model: String,
+        custom_app_id: String,
+        tag: &'static str,
+        app_type_str: &'static str,
+    ) -> Result<Self, ProxyError> {
+        let start_time = Instant::now();
+        let mut app_config = state
+            .db
+            .get_proxy_config_for_app(app_type.as_str())
+            .await
+            .map_err(|e| ProxyError::DatabaseError(e.to_string()))?;
+        // 自定义应用没有 direct/proxy 切换，也不参与故障转移；这里只借超时配置。
+        app_config.auto_failover_enabled = false;
+        app_config.max_retries = 0;
+
+        let rectifier_config = state.db.get_rectifier_config().unwrap_or_default();
+        let optimizer_config = state.db.get_optimizer_config().unwrap_or_default();
+        let copilot_optimizer_config = state.db.get_copilot_optimizer_config().unwrap_or_default();
+        let session_result = extract_session_id(headers, body, &custom_app_id);
+        let current_provider_id = provider.id.clone();
+
+        Ok(Self {
+            start_time,
+            app_config,
+            provider: provider.clone(),
+            providers: vec![provider],
+            current_provider_id,
+            request_model,
+            outbound_model: Some(upstream_model.clone()),
+            tag,
+            app_type_str,
+            usage_app_type: Some(custom_app_id),
+            usage_model_override: Some(upstream_model),
+            app_type,
+            session_id: session_result.session_id,
+            session_client_provided: session_result.client_provided,
+            rectifier_config,
+            optimizer_config,
+            copilot_optimizer_config,
+            is_stack: true,
+        })
+    }
+
+    /// usage 日志使用的 app_type：自定义应用返回 custom-<uuid>，固定应用返回原值。
+    pub(crate) fn usage_app_type(&self) -> &str {
+        self.usage_app_type.as_deref().unwrap_or(self.app_type_str)
     }
 
     /// 从 URI 提取模型名称（Gemini 专用）

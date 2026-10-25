@@ -4,6 +4,7 @@ pub mod codex_oauth_models;
 pub mod codex_session_compression;
 pub mod coding_plan;
 pub mod config;
+pub mod custom_apps;
 pub mod dsh_relay;
 pub(crate) mod dsh_state;
 pub mod env_checker;

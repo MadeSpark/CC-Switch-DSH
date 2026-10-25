@@ -45,7 +45,22 @@ impl Database {
         )
         .map_err(|e| AppError::Database(e.to_string()))?;
 
-        // 2. Provider Endpoints 表
+        // 2. Custom Apps 表（聚合路由客户端；不维护独立供应商）
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS custom_apps (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                icon TEXT NOT NULL DEFAULT 'openai',
+                icon_color TEXT,
+                api_key TEXT NOT NULL UNIQUE,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            )",
+            [],
+        )
+        .map_err(|e| AppError::Database(e.to_string()))?;
+
+        // 3. Provider Endpoints 表
         conn.execute(
             "CREATE TABLE IF NOT EXISTS provider_endpoints (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,

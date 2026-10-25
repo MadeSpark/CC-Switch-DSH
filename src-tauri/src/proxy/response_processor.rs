@@ -520,11 +520,12 @@ pub(crate) fn create_usage_collector(
     // 用 ctx 的 app_type 而不是 parser_config 的：Claude Desktop 流式透传复用
     // CLAUDE_PARSER_CONFIG（app_type_str="claude"），按 parser_config 记账会把
     // claude-desktop 的行错记到 claude 名下，导致供应商计价覆盖解析不到。
-    let app_type_str = ctx.app_type_str;
+    let app_type_str = ctx.usage_app_type().to_string();
     let tag = ctx.tag;
     let start_time = ctx.start_time;
     let stream_parser = parser_config.stream_parser;
     let model_extractor = parser_config.model_extractor;
+    let usage_model_override = ctx.usage_model_override.clone();
     let session_id = ctx.session_id.clone();
 
     Some(SseUsageCollector::new(
@@ -532,7 +533,9 @@ pub(crate) fn create_usage_collector(
         parser_config.stream_event_filter,
         move |events, first_token_ms| {
             if let Some(usage) = stream_parser(&events) {
-                let model = model_extractor(&events, &fallback_model);
+                let model = usage_model_override
+                    .clone()
+                    .unwrap_or_else(|| model_extractor(&events, &fallback_model));
                 let latency_ms = start_time.elapsed().as_millis() as u64;
 
                 let state = state.clone();
@@ -540,12 +543,13 @@ pub(crate) fn create_usage_collector(
                 let session_id = session_id.clone();
                 let request_model = request_model.clone();
                 let outbound_model = fallback_model.clone();
+                let app_type_str = app_type_str.clone();
 
                 tokio::spawn(async move {
                     log_usage_internal(
                         &state,
                         &provider_id,
-                        app_type_str,
+                        &app_type_str,
                         &model,
                         &request_model,
                         &outbound_model,
@@ -559,19 +563,22 @@ pub(crate) fn create_usage_collector(
                     .await;
                 });
             } else {
-                let model = model_extractor(&events, &fallback_model);
+                let model = usage_model_override
+                    .clone()
+                    .unwrap_or_else(|| model_extractor(&events, &fallback_model));
                 let latency_ms = start_time.elapsed().as_millis() as u64;
                 let state = state.clone();
                 let provider_id = provider_id.clone();
                 let session_id = session_id.clone();
                 let request_model = request_model.clone();
                 let outbound_model = fallback_model.clone();
+                let app_type_str = app_type_str.clone();
 
                 tokio::spawn(async move {
                     log_usage_internal(
                         &state,
                         &provider_id,
-                        app_type_str,
+                        &app_type_str,
                         &model,
                         &request_model,
                         &outbound_model,
@@ -609,8 +616,12 @@ fn spawn_log_usage(
 
     let state = state.clone();
     let provider_id = ctx.provider.id.clone();
-    let app_type_str = ctx.app_type_str.to_string();
-    let model = model.to_string();
+    let app_type_str = ctx.usage_app_type().to_string();
+    let model = ctx
+        .usage_model_override
+        .as_deref()
+        .unwrap_or(model)
+        .to_string();
     let request_model = request_model.to_string();
     // 「按请求计价」模式的锚点：映射后的出站模型，无映射时等于 request_model
     let outbound_model = ctx

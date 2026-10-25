@@ -1,4 +1,44 @@
 {
+  "customApps": {
+    "title": "Özel Uygulamalar",
+    "add": "Uygulama ekle",
+    "help": "Özel uygulamalar istekleri yerel toplama rotası üzerinden iletir: API OpenAI uyumludur, modeller yapılandırılmış sağlayıcılardan toplanır ve adres yerel rota bağlantı noktasını izler.",
+    "empty": "Henüz özel uygulama yok. Oluşturmak için sağ üstteki \u201cUygulama ekle\u201d düğmesini kullanın.",
+    "edit": "Düzenle",
+    "delete": "Sil",
+    "deleteTitle": "\u201c{{name}}\u201d silinsin mi",
+    "deleteBody": "Silindikten sonra \u201c{{name}}\u201d adresine bağlanan istemciler anında çalışmaz hale gelir ve geri alınamaz. Silinsin mi?",
+    "apiAddress": "API adresi",
+    "addressHint": "Uç nokta OpenAI uyumlu biçimi izler: /custom/{{appId}}/v1. Bağlantı noktası yerel rotaya göre değişir; gösterilen değer günceldir.",
+    "proxyNotRunning": "Önce yerel rotayı başlatın",
+    "copyAddress": "API adresini kopyala",
+    "apiKey": "API Key",
+    "copyKey": "API Key\u2019i kopyala",
+    "resetKey": "API Key\u2019i sıfırla",
+    "modelsTitle": "Toplanan modeller ({{count}})",
+    "modelsLoading": "Modeller yükleniyor…",
+    "modelsEmpty": "Toplanacak model yok: önce sağlayıcılar sayfasında modelleri etkinleştirin ve yapılandırın.",
+    "dialog": {
+      "createTitle": "Özel uygulama ekle",
+      "editTitle": "Özel uygulamayı düzenle",
+      "nameLabel": "Ad",
+      "namePlaceholder": "örn. Toplama uç noktam",
+      "iconLabel": "Simge",
+      "routingNote": "Özel uygulamalar her zaman toplama rotasını kullanır: modeller etkin sağlayıcılardan toplanır; tek bir sağlayıcıya doğrudan bağlantı desteklenmez."
+    },
+    "toast": {
+      "created": "\u201c{{name}}\u201d oluşturuldu",
+      "createFailed": "Oluşturma başarısız: {{error}}",
+      "updated": "\u201c{{name}}\u201d kaydedildi",
+      "updateFailed": "Kaydetme başarısız: {{error}}",
+      "deleted": "\u201c{{name}}\u201d silindi",
+      "deleteFailed": "Silme başarısız: {{error}}",
+      "keyRegenerated": "\u201c{{name}}\u201d için API Key sıfırlandı",
+      "keyRegenerateFailed": "API Key sıfırlama başarısız: {{error}}",
+      "addressCopied": "API adresi kopyalandı",
+      "keyCopied": "API Key kopyalandı"
+    }
+  },
   "app": {
     "title": "CC Switch",
     "description": "Claude Code, Codex ve Gemini CLI için Hepsi Bir Arada Asistan"
@@ -4064,6 +4104,7 @@
     "refresh": "Yenile"
   },
   "nav": {
+    "customApps": "Özel Uygulamalar",
     "mainLabel": "Ana gezinme",
     "skipToContent": "Ana içeriğe atla",
     "expandSidebar": "Kenar çubuğunu genişlet",

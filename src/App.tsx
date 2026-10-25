@@ -88,6 +88,7 @@ import { discardUnsavedChanges, hasUnsavedChanges } from "@/lib/unsavedChanges";
 import { SettingsPage } from "@/components/settings/SettingsPage";
 import { AuthCenterPanel } from "@/components/settings/AuthCenterPanel";
 import { AppsPage } from "@/components/apps/AppsPage";
+import { CustomAppsPage } from "@/components/custom-apps/CustomAppsPage";
 import {
   checkToolUpdatesInBackground,
   useToolUpdatesAvailable,
@@ -1543,6 +1544,8 @@ function App() {
             onOpenTerminalSettings={() => openSettings("general")}
           />
         );
+      case "customApps":
+        return <CustomAppsPage />;
       case "apps":
         return <AppsPage />;
       default:

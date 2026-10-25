@@ -1,4 +1,44 @@
 {
+  "customApps": {
+    "title": "自訂應用",
+    "add": "新增應用",
+    "help": "自訂應用透過本地聚合路由轉發請求：介面相容 OpenAI，模型來自已設定的供應商，路由地址隨本地路由連接埠變化。",
+    "empty": "還沒有自訂應用。點右上角「新增應用」建立一個。",
+    "edit": "編輯",
+    "delete": "刪除",
+    "deleteTitle": "刪除「{{name}}」",
+    "deleteBody": "刪除後參照「{{name}}」的用戶端會立刻失效，且無法復原。確定要刪除嗎？",
+    "apiAddress": "API 位址",
+    "addressHint": "介面路徑為 OpenAI 相容格式：/custom/{{appId}}/v1。連接埠隨本地路由變化，以目前顯示為準。",
+    "proxyNotRunning": "先啟動本地路由",
+    "copyAddress": "複製 API 位址",
+    "apiKey": "API Key",
+    "copyKey": "複製 API Key",
+    "resetKey": "重設 API Key",
+    "modelsTitle": "聚合模型（{{count}}）",
+    "modelsLoading": "正在載入模型…",
+    "modelsEmpty": "沒有可聚合的模型：先在供應商頁啟用並設定模型。",
+    "dialog": {
+      "createTitle": "新增自訂應用",
+      "editTitle": "編輯自訂應用",
+      "nameLabel": "名稱",
+      "namePlaceholder": "例如：我的聚合入口",
+      "iconLabel": "圖示",
+      "routingNote": "自訂應用固定走聚合路由：模型來自啟用的供應商，不支援直連單一供應商。"
+    },
+    "toast": {
+      "created": "已建立「{{name}}」",
+      "createFailed": "建立失敗：{{error}}",
+      "updated": "已儲存「{{name}}」",
+      "updateFailed": "儲存失敗：{{error}}",
+      "deleted": "已刪除「{{name}}」",
+      "deleteFailed": "刪除失敗：{{error}}",
+      "keyRegenerated": "已重設「{{name}}」的 API Key",
+      "keyRegenerateFailed": "重設 API Key 失敗：{{error}}",
+      "addressCopied": "API 位址已複製",
+      "keyCopied": "API Key 已複製"
+    }
+  },
   "app": {
     "title": "CC Switch",
     "description": "Claude Code / Codex / Gemini CLI 全方位輔助工具"
@@ -4165,6 +4205,7 @@
     "refresh": "重新整理"
   },
   "nav": {
+    "customApps": "自訂應用",
     "mainLabel": "主導覽",
     "skipToContent": "跳到主要內容",
     "expandSidebar": "展開側欄",

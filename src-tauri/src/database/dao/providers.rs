@@ -194,6 +194,68 @@ impl Database {
         Ok(providers)
     }
 
+    /// 读取 providers 表里的全部固定应用供应商（自定义应用不拥有独立供应商）。
+    ///
+    /// 与按应用读取不同，这里只依赖单行字段；meta.custom_endpoints 由各应用自己的
+    /// 读取路径补齐，模型聚合和精确路由都不需要它。
+    pub(crate) fn get_all_providers_cross_app(
+        &self,
+    ) -> Result<Vec<(crate::app_config::AppType, Provider)>, AppError> {
+        let conn = lock_conn!(self.conn);
+        let mut stmt = conn
+            .prepare(
+                "SELECT app_type, id, name, settings_config, website_url, category, created_at,
+                        sort_index, notes, icon, icon_color, meta, in_failover_queue
+                 FROM providers
+                 ORDER BY app_type ASC, COALESCE(sort_index, 999999), created_at ASC, id ASC",
+            )
+            .map_err(|e| AppError::Database(e.to_string()))?;
+
+        let rows = stmt
+            .query_map([], |row| {
+                let app_type: String = row.get(0)?;
+                let id: String = row.get(1)?;
+                let settings_config_str: String = row.get(3)?;
+                let meta_str: String = row.get(11)?;
+                Ok((
+                    app_type,
+                    Provider {
+                        id,
+                        name: row.get(2)?,
+                        settings_config: serde_json::from_str(&settings_config_str)
+                            .unwrap_or(serde_json::Value::Null),
+                        website_url: row.get(4)?,
+                        category: row.get(5)?,
+                        created_at: row.get(6)?,
+                        sort_index: row.get(7)?,
+                        notes: row.get(8)?,
+                        meta: Some(
+                            serde_json::from_str(&meta_str)
+                                .unwrap_or_else(|_| ProviderMeta::default()),
+                        ),
+                        icon: row.get(9)?,
+                        icon_color: row.get(10)?,
+                        in_failover_queue: row.get(12)?,
+                    },
+                ))
+            })
+            .map_err(|e| AppError::Database(e.to_string()))?;
+
+        let mut providers = Vec::new();
+        for row in rows {
+            let (app_type, provider) = row.map_err(|e| AppError::Database(e.to_string()))?;
+            match app_type.parse::<crate::app_config::AppType>() {
+                Ok(app_type) => providers.push((app_type, provider)),
+                Err(_) => log::warn!(
+                    "[custom-apps] 忽略未知 app_type='{}' 的 provider '{}'",
+                    app_type,
+                    provider.id
+                ),
+            }
+        }
+        Ok(providers)
+    }
+
     pub fn get_current_provider(&self, app_type: &str) -> Result<Option<String>, AppError> {
         let conn = lock_conn!(self.conn);
         let mut stmt = conn

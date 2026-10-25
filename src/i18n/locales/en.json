@@ -1,4 +1,44 @@
 {
+  "customApps": {
+    "title": "Custom Apps",
+    "add": "Add app",
+    "help": "Custom apps forward requests through the local aggregation route: the API is OpenAI-compatible, models come from configured providers, and the address follows the local route port.",
+    "empty": "No custom apps yet. Use \u201cAdd app\u201d in the top-right corner to create one.",
+    "edit": "Edit",
+    "delete": "Delete",
+    "deleteTitle": "Delete \u201c{{name}}\u201d",
+    "deleteBody": "Clients pointing at \u201c{{name}}\u201d stop working immediately and the app cannot be recovered. Delete it?",
+    "apiAddress": "API address",
+    "addressHint": "The endpoint follows the OpenAI-compatible format: /custom/{{appId}}/v1. The port follows the local route; the value shown here is current.",
+    "proxyNotRunning": "Start the local route first",
+    "copyAddress": "Copy API address",
+    "apiKey": "API Key",
+    "copyKey": "Copy API Key",
+    "resetKey": "Reset API Key",
+    "modelsTitle": "Aggregated models ({{count}})",
+    "modelsLoading": "Loading models…",
+    "modelsEmpty": "No models to aggregate: enable and configure models on the providers page first.",
+    "dialog": {
+      "createTitle": "Add custom app",
+      "editTitle": "Edit custom app",
+      "nameLabel": "Name",
+      "namePlaceholder": "e.g. My aggregation endpoint",
+      "iconLabel": "Icon",
+      "routingNote": "Custom apps always go through the aggregation route: models come from enabled providers; direct connection to a single provider is not supported."
+    },
+    "toast": {
+      "created": "Created \u201c{{name}}\u201d",
+      "createFailed": "Failed to create: {{error}}",
+      "updated": "Saved \u201c{{name}}\u201d",
+      "updateFailed": "Failed to save: {{error}}",
+      "deleted": "Deleted \u201c{{name}}\u201d",
+      "deleteFailed": "Failed to delete: {{error}}",
+      "keyRegenerated": "Reset the API Key of \u201c{{name}}\u201d",
+      "keyRegenerateFailed": "Failed to reset the API Key: {{error}}",
+      "addressCopied": "API address copied",
+      "keyCopied": "API Key copied"
+    }
+  },
   "app": {
     "title": "CC Switch",
     "description": "All-in-One Assistant for Claude Code, Codex & Gemini CLI"
@@ -4164,6 +4204,7 @@
     "refresh": "Refresh"
   },
   "nav": {
+    "customApps": "Custom Apps",
     "mainLabel": "Main navigation",
     "skipToContent": "Skip to main content",
     "expandSidebar": "Expand sidebar",
