@@ -568,6 +568,7 @@ mod tests {
             .expect("create custom app");
 
         let settings = json!({
+            "npm": "@ai-sdk/openai-compatible",
             "options": {
                 "baseURL": upstream_base,
                 "apiKey": "provider-secret"
@@ -591,6 +592,7 @@ mod tests {
             "decoy-provider".to_string(),
             "Decoy Provider".to_string(),
             json!({
+                "npm": "@ai-sdk/openai-compatible",
                 "options": {
                     "baseURL": "http://127.0.0.1:1/v1",
                     "apiKey": "decoy-secret"

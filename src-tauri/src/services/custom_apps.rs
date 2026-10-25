@@ -155,8 +155,116 @@ fn add_model_container(
     }
 }
 
+fn config_text(settings: &serde_json::Value) -> &str {
+    settings
+        .get("config")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("")
+}
+
+fn is_openai_chat_protocol(value: &str) -> bool {
+    let normalized = value.trim().to_ascii_lowercase().replace('_', "-");
+    matches!(
+        normalized.as_str(),
+        "openai-completions"
+            | "openai-compatible"
+            | "openai-chat"
+            | "chat-completions"
+            | "@ai-sdk/openai-compatible"
+    )
+}
+
+fn explicit_openai_chat_protocol<'a>(values: impl IntoIterator<Item = Option<&'a str>>) -> bool {
+    let mut saw_protocol = false;
+    for value in values.into_iter().flatten() {
+        let value = value.trim();
+        if value.is_empty() {
+            continue;
+        }
+        saw_protocol = true;
+        if !is_openai_chat_protocol(value) {
+            return false;
+        }
+    }
+    saw_protocol
+}
+
+fn codex_uses_chat_wire_api(settings: &serde_json::Value) -> bool {
+    let config = config_text(settings);
+    let Ok(document) = config.parse::<toml::Value>() else {
+        return false;
+    };
+    let Some(root) = document.as_table() else {
+        return false;
+    };
+    let wire_api = match root
+        .get("model_provider")
+        .and_then(toml::Value::as_str)
+        .map(str::trim)
+        .filter(|provider| !provider.is_empty())
+    {
+        Some(provider) => root
+            .get("model_providers")
+            .and_then(toml::Value::as_table)
+            .and_then(|providers| providers.get(provider))
+            .and_then(toml::Value::as_table)
+            .and_then(|provider| provider.get("wire_api"))
+            .and_then(toml::Value::as_str),
+        None => root.get("wire_api").and_then(toml::Value::as_str),
+    };
+    wire_api.is_some_and(|wire_api| wire_api.trim() == "chat")
+}
+
+fn grok_uses_chat_api_backend(settings: &serde_json::Value) -> bool {
+    crate::grok_config::extract_model_config(config_text(settings))
+        .is_some_and(|config| config.api_backend == "chat")
+}
+
+/// `/custom` 的 chat completions 入口只能接入确认实现 OpenAI Chat 协议的供应商。
+fn provider_supports_openai_chat(app_type: &AppType, provider: &Provider) -> bool {
+    let settings = &provider.settings_config;
+    match app_type {
+        AppType::Codex => codex_uses_chat_wire_api(settings),
+        AppType::GrokBuild => grok_uses_chat_api_backend(settings),
+        AppType::DeepSeekHarness => {
+            settings.get("api").and_then(serde_json::Value::as_str) == Some("openai-completions")
+        }
+        AppType::OpenCode | AppType::OpenClaw | AppType::Hermes | AppType::Pi | AppType::Mcode => {
+            let mut values = vec![
+                settings.get("api").and_then(serde_json::Value::as_str),
+                settings
+                    .get("apiFormat")
+                    .and_then(serde_json::Value::as_str),
+                settings
+                    .get("api_format")
+                    .and_then(serde_json::Value::as_str),
+            ];
+            match app_type {
+                AppType::OpenCode => {
+                    values.push(settings.get("npm").and_then(serde_json::Value::as_str))
+                }
+                AppType::Hermes => {
+                    values.push(settings.get("api_mode").and_then(serde_json::Value::as_str))
+                }
+                _ => {}
+            }
+            values.push(
+                provider
+                    .meta
+                    .as_ref()
+                    .and_then(|meta| meta.api_format.as_deref()),
+            );
+            explicit_openai_chat_protocol(values)
+        }
+        AppType::Claude | AppType::ClaudeDesktop | AppType::Gemini => false,
+    }
+}
+
 /// 从单个 provider.settings_config 提取全部模型 id。
-pub(crate) fn extract_provider_model_ids(settings: &serde_json::Value) -> Vec<String> {
+pub(crate) fn extract_provider_model_ids(
+    settings: &serde_json::Value,
+    app_type: &AppType,
+) -> Vec<String> {
     let mut models = BTreeSet::new();
 
     add_model_container(
@@ -184,6 +292,19 @@ pub(crate) fn extract_provider_model_ids(settings: &serde_json::Value) -> Vec<St
         }
     }
 
+    let config = config_text(settings);
+    match app_type {
+        AppType::Codex => {
+            models.extend(crate::codex_config::codex_published_models(
+                settings, config,
+            ));
+        }
+        AppType::GrokBuild => {
+            models.extend(crate::grok_config::published_models(config));
+        }
+        _ => {}
+    }
+
     models.into_iter().collect()
 }
 
@@ -196,7 +317,10 @@ pub(crate) fn aggregate_provider_models(providers: &[(AppType, Provider)]) -> Ve
             log::warn!("[custom-apps] 跳过空 provider id 的模型聚合行");
             continue;
         }
-        for upstream_model in extract_provider_model_ids(&provider.settings_config) {
+        if !provider_supports_openai_chat(app_type, provider) {
+            continue;
+        }
+        for upstream_model in extract_provider_model_ids(&provider.settings_config, app_type) {
             let id = format!("{upstream_model}-{}", provider.id);
             let candidate = CustomAppModel {
                 id: id.clone(),
@@ -264,43 +388,58 @@ pub(crate) fn resolve_model_route(
         });
     }
 
-    let mut providers: BTreeMap<(String, String), String> = BTreeMap::new();
+    let mut routes: BTreeMap<(String, String), String> = BTreeMap::new();
     for model in models {
-        providers
+        routes
             .entry((model.app_type.clone(), model.provider_id.clone()))
             .or_insert_with(|| model.provider_name.clone());
     }
-    let mut providers: Vec<(String, String, String)> = providers
-        .into_iter()
-        .map(|((app_type, provider_id), provider_name)| (app_type, provider_id, provider_name))
-        .collect();
+
+    let mut providers: BTreeMap<String, Vec<(String, String)>> = BTreeMap::new();
+    for ((app_type, provider_id), provider_name) in routes {
+        providers
+            .entry(provider_id)
+            .or_default()
+            .push((app_type, provider_name));
+    }
+    let mut providers: Vec<(String, Vec<(String, String)>)> = providers.into_iter().collect();
     providers.sort_by(|left, right| {
         right
-            .1
+            .0
             .len()
-            .cmp(&left.1.len())
+            .cmp(&left.0.len())
             .then_with(|| left.0.cmp(&right.0))
-            .then_with(|| left.1.cmp(&right.1))
     });
 
-    for (app_type, provider_id, provider_name) in providers {
+    for (provider_id, mut routes) in providers {
         let suffix = format!("-{provider_id}");
-        if let Some(upstream_model) = requested_id.strip_suffix(&suffix) {
-            let upstream_model = upstream_model.trim();
-            if upstream_model.is_empty() {
-                continue;
-            }
-            return Some(CustomModelRoute {
-                model: CustomAppModel {
-                    id: requested_id.to_string(),
-                    upstream_model: upstream_model.to_string(),
-                    provider_id,
-                    provider_name,
-                    app_type,
-                },
-                upstream_model: upstream_model.to_string(),
-            });
+        let Some(upstream_model) = requested_id.strip_suffix(&suffix) else {
+            continue;
+        };
+        let upstream_model = upstream_model.trim();
+        if upstream_model.is_empty() {
+            continue;
         }
+
+        routes.sort_by(|left, right| left.0.cmp(&right.0));
+        let app_types: BTreeSet<&str> = routes
+            .iter()
+            .map(|(app_type, _)| app_type.as_str())
+            .collect();
+        if app_types.len() != 1 {
+            return None;
+        }
+        let (app_type, provider_name) = routes.remove(0);
+        return Some(CustomModelRoute {
+            model: CustomAppModel {
+                id: requested_id.to_string(),
+                upstream_model: upstream_model.to_string(),
+                provider_id,
+                provider_name,
+                app_type,
+            },
+            upstream_model: upstream_model.to_string(),
+        });
     }
     None
 }
@@ -456,6 +595,22 @@ mod tests {
         provider
     }
 
+    fn codex_settings(model: &str, wire_api: &str) -> serde_json::Value {
+        json!({
+            "config": format!(
+                "model_provider = \"custom\"\nmodel = \"{model}\"\n\n[model_providers.custom]\nbase_url = \"https://example.com/v1\"\nwire_api = \"{wire_api}\"\n"
+            )
+        })
+    }
+
+    fn grok_settings(profile: &str, api_backend: &str) -> serde_json::Value {
+        json!({
+            "config": format!(
+                "[models]\ndefault = \"{profile}\"\n\n[model.\"{profile}\"]\nmodel = \"{profile}\"\nname = \"{profile}\"\nbase_url = \"https://example.com/v1\"\napi_key = \"key\"\napi_backend = \"{api_backend}\"\ncontext_window = 500000\n"
+            )
+        })
+    }
+
     #[test]
     fn extracts_models_from_supported_shapes() {
         let settings = json!({
@@ -486,7 +641,7 @@ mod tests {
             }
         });
         assert_eq!(
-            extract_provider_model_ids(&settings),
+            extract_provider_model_ids(&settings, &AppType::OpenClaw),
             vec![
                 "anthropic-model",
                 "anthropic-opus",
@@ -519,43 +674,270 @@ mod tests {
             "env": {"OPENAI_MODEL": ""}
         });
         assert_eq!(
-            extract_provider_model_ids(&settings),
+            extract_provider_model_ids(&settings, &AppType::OpenClaw),
             vec!["key-a".to_string(), "key-b".to_string()]
+        );
+    }
+
+    #[test]
+    fn extracts_codex_and_grok_models_from_config_text() {
+        let codex = codex_settings("codex-config-model", "chat");
+        assert_eq!(
+            extract_provider_model_ids(&codex, &AppType::Codex),
+            vec!["codex-config-model"]
+        );
+
+        let grok = json!({
+            "config": r#"[models]
+default = "grok-fast"
+
+[model."grok-fast"]
+model = "grok-fast"
+
+[model."grok-pro"]
+model = "grok-pro"
+"#
+        });
+        assert_eq!(
+            extract_provider_model_ids(&grok, &AppType::GrokBuild),
+            vec!["grok-fast", "grok-pro"]
         );
     }
 
     #[test]
     fn aggregate_suffixes_and_deduplicates_with_deterministic_conflict_winner() {
         let providers = vec![
-            (AppType::Codex, provider("z", "Z", json!({"model": "same"}))),
             (
-                AppType::Claude,
-                provider("a", "A", json!({"model": "same"})),
+                AppType::Codex,
+                provider("z", "Z", codex_settings("same", "chat")),
+            ),
+            (
+                AppType::OpenClaw,
+                provider(
+                    "a",
+                    "A",
+                    json!({"api": "openai-completions", "model": "same"}),
+                ),
             ),
         ];
         let models = aggregate_provider_models(&providers);
         assert_eq!(models.len(), 2);
         assert_eq!(models[0].id, "same-a");
-        assert_eq!(models[0].app_type, "claude");
+        assert_eq!(models[0].app_type, "openclaw");
         assert_eq!(models[1].id, "same-z");
+        assert_eq!(models[1].app_type, "codex");
     }
 
     #[test]
     fn aggregate_conflict_keeps_lexicographically_smallest_route() {
         let providers = vec![
-            (AppType::Codex, provider("p", "P1", json!({"model": "x-p"}))),
             (
-                AppType::Claude,
-                provider("p-p", "P2", json!({"model": "x"})),
+                AppType::Codex,
+                provider("p", "P1", codex_settings("x-p", "chat")),
+            ),
+            (
+                AppType::OpenClaw,
+                provider(
+                    "p-p",
+                    "P2",
+                    json!({"api": "openai-completions", "model": "x"}),
+                ),
             ),
         ];
-        // 两者都生成 x-p-p；按 (appType, providerId, model) 保留 claude / p-p / x。
+        // 两者都生成 x-p-p；按 (appType, providerId, model) 保留 codex / p / x-p。
         let models = aggregate_provider_models(&providers);
         assert_eq!(models.len(), 1);
         assert_eq!(models[0].id, "x-p-p");
-        assert_eq!(models[0].app_type, "claude");
-        assert_eq!(models[0].provider_id, "p-p");
-        assert_eq!(models[0].upstream_model, "x");
+        assert_eq!(models[0].app_type, "codex");
+        assert_eq!(models[0].provider_id, "p");
+        assert_eq!(models[0].upstream_model, "x-p");
+    }
+
+    #[test]
+    fn aggregate_only_includes_openai_chat_compatible_providers() {
+        let providers = vec![
+            (
+                AppType::Codex,
+                provider("codex-ok", "Codex OK", codex_settings("codex-ok", "chat")),
+            ),
+            (
+                AppType::Codex,
+                provider(
+                    "codex-no",
+                    "Codex Responses",
+                    codex_settings("codex-no", "responses"),
+                ),
+            ),
+            (
+                AppType::GrokBuild,
+                provider("grok-ok", "Grok OK", grok_settings("grok-ok", "chat")),
+            ),
+            (
+                AppType::GrokBuild,
+                provider(
+                    "grok-no",
+                    "Grok Responses",
+                    grok_settings("grok-no", "responses"),
+                ),
+            ),
+            (
+                AppType::DeepSeekHarness,
+                provider(
+                    "dsh-ok",
+                    "DSH OK",
+                    json!({"api": "openai-completions", "model": "dsh-ok"}),
+                ),
+            ),
+            (
+                AppType::DeepSeekHarness,
+                provider(
+                    "dsh-no",
+                    "DSH Responses",
+                    json!({"api": "openai-responses", "model": "dsh-no"}),
+                ),
+            ),
+            (
+                AppType::OpenCode,
+                provider(
+                    "opencode-ok",
+                    "OpenCode OK",
+                    json!({
+                        "npm": "@ai-sdk/openai-compatible",
+                        "models": {"opencode-ok": {}}
+                    }),
+                ),
+            ),
+            (
+                AppType::OpenCode,
+                provider(
+                    "opencode-no",
+                    "OpenCode Responses",
+                    json!({"npm": "@ai-sdk/openai", "models": {"opencode-no": {}}}),
+                ),
+            ),
+            (
+                AppType::OpenClaw,
+                provider(
+                    "openclaw-ok",
+                    "OpenClaw OK",
+                    json!({"api": "openai-completions", "model": "openclaw-ok"}),
+                ),
+            ),
+            (
+                AppType::OpenClaw,
+                provider(
+                    "openclaw-no",
+                    "OpenClaw Responses",
+                    json!({"api": "openai-responses", "model": "openclaw-no"}),
+                ),
+            ),
+            (
+                AppType::Hermes,
+                provider(
+                    "hermes-ok",
+                    "Hermes OK",
+                    json!({"api_mode": "chat_completions", "model": "hermes-ok"}),
+                ),
+            ),
+            (
+                AppType::Hermes,
+                provider(
+                    "hermes-no",
+                    "Hermes Responses",
+                    json!({"api_mode": "codex_responses", "model": "hermes-no"}),
+                ),
+            ),
+            (
+                AppType::Pi,
+                provider(
+                    "pi-ok",
+                    "Pi OK",
+                    json!({"api": "openai-completions", "model": "pi-ok"}),
+                ),
+            ),
+            (
+                AppType::Pi,
+                provider(
+                    "pi-no",
+                    "Pi Anthropic",
+                    json!({"api": "anthropic-messages", "model": "pi-no"}),
+                ),
+            ),
+            (
+                AppType::Mcode,
+                provider(
+                    "mcode-ok",
+                    "Mcode OK",
+                    json!({"api": "openai-completions", "model": "mcode-ok"}),
+                ),
+            ),
+            (
+                AppType::Mcode,
+                provider(
+                    "mcode-no",
+                    "Mcode Responses",
+                    json!({"api": "openai-responses", "model": "mcode-no"}),
+                ),
+            ),
+            (
+                AppType::Claude,
+                provider(
+                    "claude-no",
+                    "Claude",
+                    json!({"api": "openai-completions", "model": "claude-no"}),
+                ),
+            ),
+            (
+                AppType::ClaudeDesktop,
+                provider(
+                    "desktop-no",
+                    "Claude Desktop",
+                    json!({"api": "openai-completions", "model": "desktop-no"}),
+                ),
+            ),
+            (
+                AppType::Gemini,
+                provider(
+                    "gemini-no",
+                    "Gemini",
+                    json!({"api": "openai-completions", "model": "gemini-no"}),
+                ),
+            ),
+        ];
+
+        let models = aggregate_provider_models(&providers);
+        let mut provider_ids: Vec<&str> = models
+            .iter()
+            .map(|model| model.provider_id.as_str())
+            .collect();
+        provider_ids.sort_unstable();
+        assert_eq!(
+            provider_ids,
+            vec![
+                "codex-ok",
+                "dsh-ok",
+                "grok-ok",
+                "hermes-ok",
+                "mcode-ok",
+                "openclaw-ok",
+                "opencode-ok",
+                "pi-ok",
+            ]
+        );
+        assert!(!models.iter().any(|model| matches!(
+            model.provider_id.as_str(),
+            "codex-no"
+                | "grok-no"
+                | "dsh-no"
+                | "opencode-no"
+                | "openclaw-no"
+                | "hermes-no"
+                | "pi-no"
+                | "mcode-no"
+                | "claude-no"
+                | "desktop-no"
+                | "gemini-no"
+        )));
     }
 
     #[test]
@@ -586,6 +968,47 @@ mod tests {
         assert_eq!(suffix.model.app_type, "claude");
 
         assert!(resolve_model_route(&models, "missing").is_none());
+    }
+
+    #[test]
+    fn route_rejects_ambiguous_suffix_but_keeps_exact_and_longest_overlap() {
+        let models = vec![
+            CustomAppModel {
+                id: "exact-p".to_string(),
+                upstream_model: "exact".to_string(),
+                provider_id: "p".to_string(),
+                provider_name: "Codex P".to_string(),
+                app_type: "codex".to_string(),
+            },
+            CustomAppModel {
+                id: "other-p".to_string(),
+                upstream_model: "other".to_string(),
+                provider_id: "p".to_string(),
+                provider_name: "Claude P".to_string(),
+                app_type: "claude".to_string(),
+            },
+            CustomAppModel {
+                id: "gpt-long-p".to_string(),
+                upstream_model: "gpt".to_string(),
+                provider_id: "long-p".to_string(),
+                provider_name: "Long P".to_string(),
+                app_type: "openclaw".to_string(),
+            },
+        ];
+
+        let exact = resolve_model_route(&models, "exact-p").unwrap();
+        assert_eq!(exact.upstream_model, "exact");
+        assert_eq!(exact.model.app_type, "codex");
+
+        assert!(
+            resolve_model_route(&models, "new-model-p").is_none(),
+            "same provider id in multiple app types must not guess a route"
+        );
+
+        let overlap = resolve_model_route(&models, "new-model-long-p").unwrap();
+        assert_eq!(overlap.upstream_model, "new-model");
+        assert_eq!(overlap.model.provider_id, "long-p");
+        assert_eq!(overlap.model.app_type, "openclaw");
     }
 
     #[test]
