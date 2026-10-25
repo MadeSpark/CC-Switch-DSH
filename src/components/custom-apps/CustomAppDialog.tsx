@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -68,7 +69,10 @@ export function CustomAppDialog({
               : t("customApps.dialog.createTitle")}
           </DialogTitle>
         </DialogHeader>
-        <div className="space-y-4 py-2">
+        <DialogDescription className="sr-only">
+          {t("customApps.dialog.routingNote")}
+        </DialogDescription>
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-4">
           <div className="space-y-2">
             <Label htmlFor="custom-app-name">
               {t("customApps.dialog.nameLabel")}
