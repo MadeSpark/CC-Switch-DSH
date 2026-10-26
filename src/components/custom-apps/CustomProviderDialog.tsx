@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Loader2, Plus, Trash2 } from "lucide-react";
+import { FormProvider, useForm } from "react-hook-form";
+import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -12,12 +13,12 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { DeepSeekHarnessFormFields } from "@/components/providers/forms/DeepSeekHarnessFormFields";
+import {
+  withDshRowKeys,
+  type DshModel,
+} from "@/components/providers/forms/helpers/deepseekHarnessFormUtils";
 import type { Provider } from "@/types";
-
-interface CustomProviderModelRow {
-  id: string;
-  name: string;
-}
 
 interface CustomProviderDialogProps {
   isOpen: boolean;
@@ -27,27 +28,33 @@ interface CustomProviderDialogProps {
   onConfirm: (provider: Provider) => void;
 }
 
-function providerSettings(provider?: Provider | null): {
-  baseURL: string;
-  apiKey: string;
-  models: CustomProviderModelRow[];
-} {
-  const settings = provider?.settingsConfig ?? {};
-  const rawModels = Array.isArray(settings.models) ? settings.models : [];
-  return {
-    baseURL: typeof settings.baseURL === "string" ? settings.baseURL : "",
-    apiKey: typeof settings.apiKey === "string" ? settings.apiKey : "",
-    models: rawModels
+const CUSTOM_API_OPTIONS = ["openai-completions"] as const;
+
+function readModels(provider?: Provider | null): DshModel[] {
+  const raw = provider?.settingsConfig?.models;
+  if (!Array.isArray(raw)) return [];
+  return withDshRowKeys(
+    raw
       .map((item) => {
         if (typeof item === "string") return { id: item, name: "" };
         const record = item as Record<string, unknown>;
         return {
           id: typeof record.id === "string" ? record.id : "",
           name: typeof record.name === "string" ? record.name : "",
+          contextWindow:
+            typeof record.contextWindow === "number"
+              ? record.contextWindow
+              : undefined,
         };
       })
       .filter((item) => item.id.trim().length > 0),
-  };
+  );
+}
+
+function readString(settings: unknown, key: string): string {
+  if (!settings || typeof settings !== "object") return "";
+  const value = (settings as Record<string, unknown>)[key];
+  return typeof value === "string" ? value : "";
 }
 
 export function CustomProviderDialog({
@@ -58,45 +65,57 @@ export function CustomProviderDialog({
   onConfirm,
 }: CustomProviderDialogProps) {
   const { t } = useTranslation();
+  const form = useForm();
   const [id, setId] = useState("");
   const [idManuallyEdited, setIdManuallyEdited] = useState(false);
-  const [name, setName] = useState("");
+  const [displayName, setDisplayName] = useState("");
   const [baseURL, setBaseURL] = useState("");
   const [apiKey, setApiKey] = useState("");
-  const [models, setModels] = useState<CustomProviderModelRow[]>([
-    { id: "", name: "" },
-  ]);
+  const [apiKeyEnv, setApiKeyEnv] = useState("");
+  const [api, setApi] = useState("openai-completions");
+  const [maxTokens, setMaxTokens] = useState("");
+  const [models, setModels] = useState<DshModel[]>([]);
+  const [defaultModel, setDefaultModel] = useState("");
 
   useEffect(() => {
     if (!isOpen) return;
-    const parsed = providerSettings(provider);
-    setIdManuallyEdited(Boolean(provider));
+    const settings = provider?.settingsConfig;
     setId(provider?.id ?? "");
-    setName(provider?.name ?? "");
-    setBaseURL(parsed.baseURL);
-    setApiKey(parsed.apiKey);
-    setModels(
-      parsed.models.length > 0 ? parsed.models : [{ id: "", name: "" }],
+    setIdManuallyEdited(false);
+    setDisplayName(provider?.name ?? "");
+    setBaseURL(readString(settings, "baseURL"));
+    setApiKey(readString(settings, "apiKey"));
+    setApiKeyEnv(readString(settings, "apiKeyEnv"));
+    setApi(
+      readString(settings, "api") === "openai-completions"
+        ? "openai-completions"
+        : "openai-completions",
+    );
+    setMaxTokens(readString(settings, "maxTokens"));
+    const parsedModels = readModels(provider);
+    setModels(parsedModels);
+    setDefaultModel(
+      typeof settings?.defaultModel === "string"
+        ? settings.defaultModel
+        : (parsedModels[0]?.id ?? ""),
     );
   }, [isOpen, provider]);
 
-  // 供应商 id 未手动编辑时，从名称自动推导 slug（小写字母数字与连字符）
+  // 新供应商的 ID 跟随名称；用户手动改过 ID 后不再覆盖。
   useEffect(() => {
     if (idManuallyEdited || provider) return;
-    const slug = name
+    const slug = displayName
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-+|-+$/g, "");
     setId(slug);
-  }, [idManuallyEdited, provider, name]);
+  }, [displayName, idManuallyEdited, provider]);
 
-  const validModels = models
-    .map((model) => ({ id: model.id.trim(), name: model.name.trim() }))
-    .filter((model) => model.id.length > 0);
+  const validModels = models.filter((model) => model.id.trim().length > 0);
   const canSubmit =
     !pending &&
     /^[a-z0-9][a-z0-9-]*$/.test(id.trim()) &&
-    name.trim().length > 0 &&
+    displayName.trim().length > 0 &&
     /^https?:\/\//i.test(baseURL.trim()) &&
     apiKey.trim().length > 0 &&
     validModels.length > 0;
@@ -105,25 +124,26 @@ export function CustomProviderDialog({
     if (!canSubmit) return;
     onConfirm({
       id: id.trim(),
-      name: name.trim(),
+      name: displayName.trim(),
       settingsConfig: {
         baseURL: baseURL.trim(),
         apiKey: apiKey.trim(),
-        models: validModels.map((model) => ({
-          id: model.id,
-          name: model.name || model.id,
-        })),
+        api,
+        apiKeyEnv: apiKeyEnv.trim() || undefined,
+        maxTokens: maxTokens.trim() || undefined,
+        defaultModel: defaultModel.trim() || undefined,
+        models: validModels.map((model) => {
+          const { rowKey: _rowKey, id: modelId, name: modelName, ...extra } =
+            model;
+          return {
+            ...extra,
+            id: modelId.trim(),
+            name: (modelName ?? "").trim() || modelId.trim(),
+          };
+        }),
       },
       category: "custom",
     });
-  };
-
-  const updateModel = (index: number, field: "id" | "name", value: string) => {
-    setModels((current) =>
-      current.map((model, i) =>
-        i === index ? { ...model, [field]: value } : model,
-      ),
-    );
   };
 
   return (
@@ -138,110 +158,54 @@ export function CustomProviderDialog({
           {t("customApps.dialog.routingNote")}
         </DialogDescription>
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="custom-provider-id">
-                {t("opencode.providerKey")}
-              </Label>
-              <Input
-                id="custom-provider-id"
-                value={id}
-                placeholder={t("opencode.providerKeyPlaceholder")}
-                onChange={(event) => {
-                  setIdManuallyEdited(true);
-                  setId(event.target.value);
-                }}
-                disabled={Boolean(provider)}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="custom-provider-name">
-                {t("providerForm.supplierName")}
-              </Label>
-              <Input
-                id="custom-provider-name"
-                value={name}
-                placeholder={t("providerForm.supplierNamePlaceholder")}
-                onChange={(event) => setName(event.target.value)}
-              />
-            </div>
-          </div>
           <div className="space-y-2">
-            <Label htmlFor="custom-provider-base-url">
-              {t("opencode.baseUrl")}
+            <Label htmlFor="custom-provider-id">
+              {t("opencode.providerKey")}
             </Label>
             <Input
-              id="custom-provider-base-url"
-              value={baseURL}
-              placeholder={t("providerForm.apiEndpointPlaceholder")}
-              onChange={(event) => setBaseURL(event.target.value)}
+              id="custom-provider-id"
+              value={id}
+              placeholder={t("opencode.providerKeyPlaceholder")}
+              onChange={(event) => {
+                setIdManuallyEdited(true);
+                setId(event.target.value);
+              }}
+              disabled={Boolean(provider)}
             />
           </div>
-          <div className="space-y-2">
-            <Label htmlFor="custom-provider-api-key">
-              {t("customApps.apiKey")}
-            </Label>
-            <Input
-              id="custom-provider-api-key"
-              type="password"
-              value={apiKey}
-              placeholder={t("customApps.apiKey")}
-              onChange={(event) => setApiKey(event.target.value)}
-            />
-          </div>
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <Label>{t("opencode.models")}</Label>
-              <Button
-                type="button"
-                variant="quiet"
-                size="compact"
-                onClick={() =>
-                  setModels((current) => [...current, { id: "", name: "" }])
+          <FormProvider {...form}>
+            <DeepSeekHarnessFormFields
+              isOfficial={false}
+              displayName={displayName}
+              onDisplayNameChange={setDisplayName}
+              maxTokens={maxTokens}
+              onMaxTokensChange={setMaxTokens}
+              apiKey={apiKey}
+              onApiKeyChange={setApiKey}
+              apiKeyEnv={apiKeyEnv}
+              onApiKeyEnvChange={setApiKeyEnv}
+              category="custom"
+              shouldShowApiKeyLink={false}
+              websiteUrl=""
+              baseUrl={baseURL}
+              onBaseUrlChange={setBaseURL}
+              api={api}
+              onApiChange={setApi}
+              apiOptions={CUSTOM_API_OPTIONS}
+              models={models}
+              onModelsChange={(next) => {
+                setModels(next);
+                if (!next.some((model) => model.id.trim() === defaultModel)) {
+                  setDefaultModel(
+                    next.find((model) => model.id.trim())?.id ?? "",
+                  );
                 }
-              >
-                <Plus className="h-3.5 w-3.5" />
-                {t("opencode.addModel")}
-              </Button>
-            </div>
-            <div className="space-y-2">
-              {models.map((model, index) => (
-                <div
-                  className="grid grid-cols-[1fr_1fr_auto] items-center gap-2"
-                  key={index}
-                >
-                  <Input
-                    value={model.id}
-                    placeholder={t("opencode.modelId")}
-                    onChange={(event) =>
-                      updateModel(index, "id", event.target.value)
-                    }
-                  />
-                  <Input
-                    value={model.name}
-                    placeholder={t("opencode.modelName")}
-                    onChange={(event) =>
-                      updateModel(index, "name", event.target.value)
-                    }
-                  />
-                  <Button
-                    type="button"
-                    variant="quiet"
-                    size="icon-compact"
-                    aria-label={t("common.delete")}
-                    disabled={models.length <= 1}
-                    onClick={() =>
-                      setModels((current) =>
-                        current.filter((_, i) => i !== index),
-                      )
-                    }
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </div>
-              ))}
-            </div>
-          </div>
+              }}
+              defaultModel={defaultModel}
+              onDefaultModelChange={setDefaultModel}
+              isDefaultModelApplicable={false}
+            />
+          </FormProvider>
           <p className="text-xs text-fg-3">
             {t("customApps.dialog.routingNote")}
           </p>

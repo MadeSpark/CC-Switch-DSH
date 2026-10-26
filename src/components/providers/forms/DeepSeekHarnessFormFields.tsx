@@ -362,6 +362,8 @@ interface DeepSeekHarnessFormFieldsProps {
   // API format
   api: string;
   onApiChange: (value: string) => void;
+  /** 可选的 API 协议；自定义应用聚合入口只暴露 OpenAI Chat。 */
+  apiOptions?: readonly string[];
 
   // Models
   models: DshModel[];
@@ -394,6 +396,7 @@ export function DeepSeekHarnessFormFields({
   onBaseUrlChange,
   api,
   onApiChange,
+  apiOptions = DSH_MODEL_API_OPTIONS,
   models,
   onModelsChange,
   defaultModel,
@@ -608,7 +611,7 @@ export function DeepSeekHarnessFormFields({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {DSH_MODEL_API_OPTIONS.map((option) => (
+              {apiOptions.map((option) => (
                 <SelectItem key={option} value={option}>
                   {t(`deepseekHarness.api_${option.replace(/-/g, "_")}`, {
                     defaultValue: API_FORMAT_LABELS[option] ?? option,

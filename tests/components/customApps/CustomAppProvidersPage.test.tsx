@@ -161,7 +161,7 @@ describe("CustomAppProvidersPage 新建供应商", () => {
     await userEvent.click(
       await screen.findByRole("button", { name: "添加供应商" }),
     );
-    const nameInput = await screen.findByLabelText("供应商名称");
+    const nameInput = await screen.findByLabelText("显示名称");
     await userEvent.type(nameInput, "My Provider");
     const idInput = screen.getByLabelText("供应商标识");
     await waitFor(() => expect(idInput).toHaveValue("my-provider"));
@@ -174,7 +174,7 @@ describe("CustomAppProvidersPage 新建供应商", () => {
     );
     const idInput = await screen.findByLabelText("供应商标识");
     await userEvent.type(idInput, "fixed-id");
-    const nameInput = screen.getByLabelText("供应商名称");
+    const nameInput = screen.getByLabelText("显示名称");
     await userEvent.type(nameInput, "另一个");
     await waitFor(() => expect(idInput).toHaveValue("fixed-id"));
   });
@@ -189,7 +189,7 @@ describe("CustomAppProvidersPage 新建供应商", () => {
       "Uppercase-Id",
     );
     await userEvent.type(
-      screen.getByLabelText("供应商名称"),
+      screen.getByLabelText("显示名称"),
       "供应商X",
     );
     await userEvent.type(
@@ -207,7 +207,7 @@ describe("CustomAppProvidersPage 新建供应商", () => {
       await screen.findByRole("button", { name: "添加供应商" }),
     );
     await userEvent.type(
-      screen.getByLabelText("供应商名称"),
+      screen.getByLabelText("显示名称"),
       "供应商X",
     );
     await userEvent.type(
@@ -218,6 +218,8 @@ describe("CustomAppProvidersPage 新建供应商", () => {
       screen.getByLabelText("API Key"),
       "sk-new",
     );
+    const dialog = screen.getByRole("dialog");
+    await userEvent.click(within(dialog).getByRole("button", { name: "添加" }));
     await userEvent.type(
       screen.getByPlaceholderText("模型 ID"),
       "gpt-4o",
@@ -246,7 +248,7 @@ describe("CustomAppProvidersPage 编辑与删除", () => {
     const idInput = await screen.findByLabelText("供应商标识");
     expect(idInput).toHaveValue("provider-a");
     expect(idInput).toBeDisabled();
-    const nameInput = screen.getByLabelText("供应商名称");
+    const nameInput = screen.getByLabelText("显示名称");
     await userEvent.clear(nameInput);
     await userEvent.type(nameInput, "供应商A改");
     await userEvent.click(screen.getByRole("button", { name: "保存" }));

@@ -10,7 +10,7 @@ use crate::provider::Provider;
 use indexmap::IndexMap;
 use rusqlite::{params, OptionalExtension, Row};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::Value;
 use std::collections::BTreeMap;
 
 const CUSTOM_APP_TYPE_PREFIX: &str = "custom:";
@@ -51,6 +51,9 @@ pub(crate) struct CustomModelRoute {
 struct CustomProviderModel {
     id: String,
     name: String,
+    /// Preserve DSH model fields such as contextWindow / reasoningEfforts.
+    #[serde(flatten)]
+    extra: serde_json::Map<String, Value>,
 }
 
 fn custom_app_from_row(row: &Row<'_>) -> rusqlite::Result<CustomApp> {
@@ -152,6 +155,7 @@ fn custom_model_from_value(value: &Value) -> Result<CustomProviderModel, AppErro
         return Ok(CustomProviderModel {
             id: id.to_string(),
             name: id.to_string(),
+            extra: serde_json::Map::new(),
         });
     }
 
@@ -171,9 +175,14 @@ fn custom_model_from_value(value: &Value) -> Result<CustomProviderModel, AppErro
         .filter(|name| !name.is_empty())
         .unwrap_or(id);
 
+    let mut extra = object.clone();
+    extra.remove("id");
+    extra.remove("name");
+    extra.remove("rowKey");
     Ok(CustomProviderModel {
         id: id.to_string(),
         name: name.to_string(),
+        extra,
     })
 }
 
@@ -188,13 +197,12 @@ fn normalize_custom_models(value: Option<&Value>) -> Result<Vec<CustomProviderMo
         Value::Object(object) => object
             .iter()
             .map(|(id, config)| {
-                json!({
-                    "id": id,
-                    "name": config
-                        .get("name")
-                        .and_then(Value::as_str)
-                        .unwrap_or(id),
-                })
+                let mut model = config.as_object().cloned().unwrap_or_default();
+                model.insert("id".to_string(), Value::String(id.clone()));
+                if model.get("name").and_then(Value::as_str).is_none() {
+                    model.insert("name".to_string(), Value::String(id.clone()));
+                }
+                Value::Object(model)
             })
             .collect(),
         _ => {
@@ -234,11 +242,21 @@ fn canonical_custom_provider_settings(settings: &Value) -> Result<Value, AppErro
         .ok_or_else(|| AppError::InvalidInput("API Key 不能为空".to_string()))?;
     let models = normalize_custom_models(object.get("models"))?;
 
-    Ok(json!({
-        "baseURL": normalize_custom_base_url(base_url)?,
-        "apiKey": normalize_custom_api_key(api_key)?,
-        "models": models,
-    }))
+    let mut canonical = object.clone();
+    canonical.insert(
+        "baseURL".to_string(),
+        Value::String(normalize_custom_base_url(base_url)?),
+    );
+    canonical.insert(
+        "apiKey".to_string(),
+        Value::String(normalize_custom_api_key(api_key)?),
+    );
+    canonical.insert(
+        "models".to_string(),
+        serde_json::to_value(models)
+            .map_err(|error| AppError::InvalidInput(format!("模型配置序列化失败: {error}")))?,
+    );
+    Ok(Value::Object(canonical))
 }
 
 /// 自定义供应商的 credentials 直接取自其固定 settings 结构。
@@ -615,12 +633,15 @@ mod tests {
             json!({
                 "baseURL": " https://api.example.com/v1/ ",
                 "apiKey": " sk-secret ",
+                "api": "openai-completions",
+                "apiKeyEnv": "CUSTOM_KEY",
+                "maxTokens": "8192",
+                "defaultModel": "gpt-7",
                 "models": [
                     "gpt-6",
-                    {"id": "gpt-7", "name": " GPT-7 "},
+                    {"id": "gpt-7", "name": " GPT-7 ", "contextWindow": 128000, "reasoningEfforts": {"low": "low"}},
                     {"id": "o3", "name": ""},
                 ],
-                "ignored": "must not be stored",
             }),
         );
 
@@ -633,9 +654,13 @@ mod tests {
             json!({
                 "baseURL": "https://api.example.com/v1",
                 "apiKey": "sk-secret",
+                "api": "openai-completions",
+                "apiKeyEnv": "CUSTOM_KEY",
+                "maxTokens": "8192",
+                "defaultModel": "gpt-7",
                 "models": [
                     {"id": "gpt-6", "name": "gpt-6"},
-                    {"id": "gpt-7", "name": "GPT-7"},
+                    {"id": "gpt-7", "name": "GPT-7", "contextWindow": 128000, "reasoningEfforts": {"low": "low"}},
                     {"id": "o3", "name": "o3"},
                 ],
             })
