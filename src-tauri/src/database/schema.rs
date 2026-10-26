@@ -45,7 +45,7 @@ impl Database {
         )
         .map_err(|e| AppError::Database(e.to_string()))?;
 
-        // 2. Custom Apps 表（聚合路由客户端；不维护独立供应商）
+        // 2. Custom Apps 表（独立路由客户端；供应商使用 custom:<app_id>）
         conn.execute(
             "CREATE TABLE IF NOT EXISTS custom_apps (
                 id TEXT PRIMARY KEY,

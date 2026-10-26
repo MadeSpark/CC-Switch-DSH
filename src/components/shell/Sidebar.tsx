@@ -26,6 +26,8 @@ import {
 } from "lucide-react";
 import type { AppId } from "@/lib/api";
 import type { VisibleApps } from "@/types";
+import type { CustomApp } from "@/lib/api/customApps";
+import { ProviderIconBox } from "@/components/ProviderIconBox";
 import { APP_IDS } from "@/config/appConfig";
 import type { GlobalPage, SettingsSection, View } from "@/lib/navigation";
 import { isAppPage, supportsMcp, supportsSkills } from "@/lib/navigation";
@@ -60,6 +62,9 @@ interface SidebarProps {
   settingsSection: SettingsSection;
   onSelectApp: (app: AppId) => void;
   onSelectPage: (page: GlobalPage | "settings") => void;
+  customApps?: CustomApp[];
+  activeCustomAppId?: string | null;
+  onSelectCustomApp?: (app: CustomApp) => void;
   onSelectSettingsSection: (section: SettingsSection) => void;
   onExitSettings: () => void;
   /** 打开了「启动时检查应用更新」并且查到了新版本 */
@@ -216,6 +221,9 @@ function MainDirectory({
   visibleApps,
   onSelectApp,
   onSelectPage,
+  customApps = [],
+  activeCustomAppId = null,
+  onSelectCustomApp,
   appsUpdateAvailable = false,
 }: DirectoryProps) {
   const { t, i18n } = useTranslation();
@@ -328,6 +336,17 @@ function MainDirectory({
               onSelect={() => onSelectApp(app)}
             />
           ))}
+          {customApps.map((app) => (
+            <CustomAppNavItem
+              key={app.id}
+              app={app}
+              collapsed={collapsed}
+              selected={
+                view === "customAppProviders" && activeCustomAppId === app.id
+              }
+              onSelect={() => onSelectCustomApp?.(app)}
+            />
+          ))}
         </div>
       </div>
 
@@ -411,6 +430,60 @@ function modeTag(
     };
   }
   return null;
+}
+
+function CustomAppNavItem({
+  app,
+  collapsed,
+  selected,
+  onSelect,
+}: {
+  app: CustomApp;
+  collapsed: boolean;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  const icon = (
+    <ProviderIconBox
+      icon={app.icon}
+      name={app.name}
+      color={app.iconColor ?? undefined}
+      className={collapsed ? "h-5 w-5 rounded-[5px]" : "h-6 w-6 rounded-[6px]"}
+      iconClassName={collapsed ? "h-4 w-4" : "h-[18px] w-[18px]"}
+    />
+  );
+  if (collapsed) {
+    return (
+      <HoverTip content={app.name} side="right" disableHoverableContent>
+        <button
+          type="button"
+          onClick={onSelect}
+          aria-label={app.name}
+          aria-current={selected ? "page" : undefined}
+          className={cn(
+            "mx-auto flex h-8 w-12 shrink-0 items-center justify-center rounded-control transition-colors hover:bg-subtle",
+            selected && "bg-selected hover:bg-selected",
+          )}
+        >
+          {icon}
+        </button>
+      </HoverTip>
+    );
+  }
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      aria-current={selected ? "page" : undefined}
+      className={cn(
+        "mx-2 flex h-8 w-[184px] shrink-0 items-center gap-2 rounded-control px-2 text-start transition-colors hover:bg-subtle",
+        selected && "bg-selected font-medium hover:bg-selected",
+      )}
+    >
+      {icon}
+      <span className="min-w-0 flex-1 truncate">{app.name}</span>
+    </button>
+  );
 }
 
 function AppNavItem({

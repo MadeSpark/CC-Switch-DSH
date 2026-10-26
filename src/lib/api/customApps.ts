@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { Provider } from "@/types";
 
 /** 自定义应用（聚合路由）。API 地址由前端按当前代理端口拼接，后端不保存端口。 */
 export interface CustomApp {
@@ -45,4 +46,10 @@ export const customAppsApi = {
     invoke<CustomApp>("regenerate_custom_app_key", { id }),
   listCustomAppModels: (id: string) =>
     invoke<CustomAppModel[]>("list_custom_app_models", { id }),
+  listCustomAppProviders: (id: string) =>
+    invoke<Record<string, Provider>>("list_custom_app_providers", { id }),
+  saveCustomAppProvider: (id: string, provider: Provider) =>
+    invoke<boolean>("save_custom_app_provider", { id, provider }),
+  deleteCustomAppProvider: (id: string, providerId: string) =>
+    invoke<boolean>("delete_custom_app_provider", { id, providerId }),
 };

@@ -2,7 +2,7 @@
   "customApps": {
     "title": "Özel Uygulamalar",
     "add": "Uygulama ekle",
-    "help": "Özel uygulamalar istekleri yerel toplama rotası üzerinden iletir: API OpenAI uyumludur, modeller OpenAI Chat uyumlu yapılandırılmış sağlayıcılardan toplanır ve adres yerel rota bağlantı noktasını izler.",
+    "help": "Özel uygulamalar istekleri yerel toplama rotası üzerinden iletir: API OpenAI uyumludur, modeller her özel uygulamanın kendi OpenAI Chat sağlayıcılarından toplanır ve adres yerel rota bağlantı noktasını izler.",
     "empty": "Henüz özel uygulama yok. Oluşturmak için sağ üstteki \u201cUygulama ekle\u201d düğmesini kullanın.",
     "edit": "Düzenle",
     "delete": "Sil",

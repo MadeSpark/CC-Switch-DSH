@@ -25,6 +25,7 @@ export type GlobalPage =
   | "prompts"
   | "sessions"
   | "customApps"
+  | "customAppProviders"
   | "apps";
 
 export type View = AppPage | GlobalPage | "settings";
@@ -67,6 +68,7 @@ const GLOBAL_PAGES: GlobalPage[] = [
   "prompts",
   "sessions",
   "customApps",
+  "customAppProviders",
   "apps",
 ];
 

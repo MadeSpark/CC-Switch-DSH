@@ -6,7 +6,8 @@ use super::{
 };
 use crate::app_config::AppType;
 use crate::services::custom_apps::{
-    list_custom_app_models, resolve_model_route, CustomApp, CustomModelRoute,
+    custom_provider_credentials, list_custom_app_models, resolve_model_route, CustomApp,
+    CustomModelRoute,
 };
 use axum::{
     extract::{Path, State},
@@ -16,7 +17,6 @@ use axum::{
 };
 use http_body_util::BodyExt;
 use serde_json::{json, Value};
-use std::str::FromStr;
 use std::time::{Duration, Instant};
 
 const CUSTOM_TAG: &str = "Custom App";
@@ -110,22 +110,6 @@ fn authenticate(
     Ok(app)
 }
 
-fn static_app_type(app_type: &AppType) -> &'static str {
-    match app_type {
-        AppType::Claude => "claude",
-        AppType::ClaudeDesktop => "claude-desktop",
-        AppType::Codex => "codex",
-        AppType::Gemini => "gemini",
-        AppType::GrokBuild => "grokbuild",
-        AppType::OpenCode => "opencode",
-        AppType::OpenClaw => "openclaw",
-        AppType::Hermes => "hermes",
-        AppType::Pi => "pi",
-        AppType::DeepSeekHarness => "deepseek-harness",
-        AppType::Mcode => "mcode",
-    }
-}
-
 /// OpenAI Chat Completions URL 规则。
 pub(crate) fn custom_chat_completions_url(base_url: &str) -> Option<String> {
     let base_url = base_url.trim().trim_end_matches('/');
@@ -145,8 +129,12 @@ pub(crate) fn custom_chat_completions_url(base_url: &str) -> Option<String> {
     }
 }
 
-fn load_route(state: &ProxyState, requested_model: &str) -> Result<CustomModelRoute, Response> {
-    let models = list_custom_app_models(&state.db).map_err(|e| {
+fn load_route(
+    state: &ProxyState,
+    app_id: &str,
+    requested_model: &str,
+) -> Result<CustomModelRoute, Response> {
+    let models = list_custom_app_models(&state.db, app_id).map_err(|e| {
         log::warn!("[custom-apps] model aggregation failed: {e}");
         api_error(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -178,7 +166,7 @@ pub async fn handle_custom_app_models(
         Ok(app) => app,
         Err(response) => return response,
     };
-    let models = match list_custom_app_models(&state.db) {
+    let models = match list_custom_app_models(&state.db, &app.id) {
         Ok(models) => models,
         Err(error) => {
             log::warn!("[custom-apps] model list failed: {error}");
@@ -217,9 +205,10 @@ pub async fn handle_custom_app_chat_completions(
     headers: HeaderMap,
     request: axum::extract::Request,
 ) -> Response {
-    if let Err(response) = authenticate(&state, &app_id, &headers) {
-        return response;
-    }
+    let app = match authenticate(&state, &app_id, &headers) {
+        Ok(app) => app,
+        Err(response) => return response,
+    };
 
     let body_bytes = match request.into_body().collect().await {
         Ok(body) => body.to_bytes(),
@@ -261,25 +250,9 @@ pub async fn handle_custom_app_chat_completions(
         );
     };
 
-    let route = match load_route(&state, &requested_model) {
+    let route = match load_route(&state, &app.id, &requested_model) {
         Ok(route) => route,
         Err(response) => return response,
-    };
-    let app_type = match AppType::from_str(&route.model.app_type) {
-        Ok(app_type) => app_type,
-        Err(error) => {
-            log::warn!(
-                "[custom-apps] invalid app_type '{}': {error}",
-                route.model.app_type
-            );
-            return api_error(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Selected provider has an unsupported app type",
-                "server_error",
-                None,
-                "internal_error",
-            );
-        }
     };
     let provider = match state
         .db
@@ -306,7 +279,19 @@ pub async fn handle_custom_app_chat_completions(
             );
         }
     };
-    let (base_url, api_key) = provider.resolve_usage_credentials(&app_type);
+    let (base_url, api_key) = match custom_provider_credentials(&provider.settings_config) {
+        Ok(credentials) => credentials,
+        Err(error) => {
+            log::warn!("[custom-apps] provider credentials invalid: {error}");
+            return api_error(
+                StatusCode::BAD_GATEWAY,
+                "Selected provider credentials are invalid.",
+                "upstream_error",
+                None,
+                "invalid_provider_credentials",
+            );
+        }
+    };
     let Some(upstream_url) = custom_chat_completions_url(&base_url) else {
         return api_error(
             StatusCode::BAD_GATEWAY,
@@ -385,17 +370,19 @@ pub async fn handle_custom_app_chat_completions(
         }
     }
 
+    // 自定义供应商固定走 OpenAI Chat，仅借用 OpenCode 的代理超时配置；
+    // usage app_type 仍由 for_custom_app 用自定义应用 id 覆盖。
     let mut ctx = match RequestContext::for_custom_app(
         &state,
         &body,
         &headers,
-        app_type.clone(),
+        AppType::OpenCode,
         provider,
         requested_model.clone(),
         route.upstream_model.clone(),
-        app_id.clone(),
+        app.id.clone(),
         CUSTOM_TAG,
-        static_app_type(&app_type),
+        "custom",
     )
     .await
     {
@@ -567,44 +554,62 @@ mod tests {
             .create_custom_app("Bot", "openai", None)
             .expect("create custom app");
 
-        let settings = json!({
-            "npm": "@ai-sdk/openai-compatible",
-            "options": {
-                "baseURL": upstream_base,
-                "apiKey": "provider-secret"
-            },
-            "models": {
-                "gpt-test": {}
-            }
-        });
         let provider = Provider::with_id(
             "mock-provider".to_string(),
             "Mock Provider".to_string(),
-            settings,
+            json!({
+                "baseURL": upstream_base,
+                "apiKey": "provider-secret",
+                "models": [{"id": "gpt-test", "name": "GPT Test"}]
+            }),
             None,
         );
-        db.save_provider("opencode", &provider)
-            .expect("save provider");
+        crate::services::custom_apps::save_custom_app_provider(&db, &app.id, &provider)
+            .expect("save custom provider");
 
-        // 同一个上游模型出现在两个 provider 时，外部 id 精确决定走哪一家；
+        // 同一个上游模型出现在两个自有 provider 时，外部 id 精确决定走哪一家；
         // 第二个 provider 的地址故意不可用，只有精确选中第一个才能成功。
         let decoy = Provider::with_id(
             "decoy-provider".to_string(),
             "Decoy Provider".to_string(),
             json!({
-                "npm": "@ai-sdk/openai-compatible",
-                "options": {
-                    "baseURL": "http://127.0.0.1:1/v1",
-                    "apiKey": "decoy-secret"
-                },
-                "models": {
-                    "gpt-test": {}
-                }
+                "baseURL": "http://127.0.0.1:1/v1",
+                "apiKey": "decoy-secret",
+                "models": [{"id": "gpt-test", "name": "GPT Test Decoy"}]
             }),
             None,
         );
-        db.save_provider("opencode", &decoy)
-            .expect("save decoy provider");
+        crate::services::custom_apps::save_custom_app_provider(&db, &app.id, &decoy)
+            .expect("save custom decoy provider");
+
+        // 固定应用和其他自定义应用都不能进入当前 app 的模型列表。
+        let fixed = Provider::with_id(
+            "fixed-provider".to_string(),
+            "Fixed Provider".to_string(),
+            json!({
+                "npm": "@ai-sdk/openai-compatible",
+                "models": {"fixed-test": {}}
+            }),
+            None,
+        );
+        db.save_provider("opencode", &fixed)
+            .expect("save fixed provider");
+
+        let other_app = db
+            .create_custom_app("Other", "openai", None)
+            .expect("create other app");
+        let other_provider = Provider::with_id(
+            "other-provider".to_string(),
+            "Other Provider".to_string(),
+            json!({
+                "baseURL": "https://other.example.com/v1",
+                "apiKey": "other-secret",
+                "models": [{"id": "other-test", "name": "Other Test"}]
+            }),
+            None,
+        );
+        crate::services::custom_apps::save_custom_app_provider(&db, &other_app.id, &other_provider)
+            .expect("save other app provider");
 
         let proxy = ProxyServer::new(
             ProxyConfig {
@@ -635,9 +640,6 @@ mod tests {
             .expect("wrong key request");
         assert_eq!(wrong_key.status(), StatusCode::UNAUTHORIZED);
 
-        let other_app = db
-            .create_custom_app("Other", "openai", None)
-            .expect("create other app");
         let wrong_app = client
             .get(format!("{base}/custom/{}/v1/models", other_app.id))
             .bearer_auth(&app.api_key)
@@ -661,8 +663,11 @@ mod tests {
             .iter()
             .filter_map(|model| model["id"].as_str())
             .collect();
+        assert_eq!(model_ids.len(), 2);
         assert!(model_ids.contains(&"gpt-test-mock-provider"));
         assert!(model_ids.contains(&"gpt-test-decoy-provider"));
+        assert!(!model_ids.iter().any(|id| id.contains("fixed-test")));
+        assert!(!model_ids.iter().any(|id| id.contains("other-test")));
 
         let other_path = client
             .get(format!("{base}/custom/{}/v1/responses", app.id))
@@ -682,6 +687,16 @@ mod tests {
         assert_eq!(missing_model.status(), StatusCode::NOT_FOUND);
         let missing_body: Value = missing_model.json().await.expect("missing model json");
         assert_eq!(missing_body["error"]["code"], "model_not_found");
+
+        // 旧实现会按 provider-id 后缀猜测未配置模型；新实现必须只接受精确模型 id。
+        let suffix_guess = client
+            .post(format!("{base}{chat_path}"))
+            .bearer_auth(&app.api_key)
+            .json(&json!({"model": "made-up-mock-provider", "messages": []}))
+            .send()
+            .await
+            .expect("suffix guess request");
+        assert_eq!(suffix_guess.status(), StatusCode::NOT_FOUND);
 
         let response = client
             .post(format!("{base}{chat_path}"))

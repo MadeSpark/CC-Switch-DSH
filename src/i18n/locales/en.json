@@ -2,7 +2,7 @@
   "customApps": {
     "title": "Custom Apps",
     "add": "Add app",
-    "help": "Custom apps forward requests through the local aggregation route: the API is OpenAI-compatible, models come from configured OpenAI Chat-compatible providers, and the address follows the local route port.",
+    "help": "Custom apps forward requests through the local aggregation route: the API is OpenAI-compatible, models come from each custom app's own OpenAI Chat providers, and the address follows the local route port.",
     "empty": "No custom apps yet. Use \u201cAdd app\u201d in the top-right corner to create one.",
     "edit": "Edit",
     "delete": "Delete",

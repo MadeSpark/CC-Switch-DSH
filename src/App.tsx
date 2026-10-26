@@ -89,6 +89,9 @@ import { SettingsPage } from "@/components/settings/SettingsPage";
 import { AuthCenterPanel } from "@/components/settings/AuthCenterPanel";
 import { AppsPage } from "@/components/apps/AppsPage";
 import { CustomAppsPage } from "@/components/custom-apps/CustomAppsPage";
+import { CustomAppProvidersPage } from "@/components/custom-apps/CustomAppProvidersPage";
+import { useCustomAppsQuery } from "@/lib/query/customApps";
+import type { CustomApp } from "@/lib/api/customApps";
 import {
   checkToolUpdatesInBackground,
   useToolUpdatesAvailable,
@@ -160,6 +163,9 @@ function App() {
   const queryClient = useQueryClient();
 
   const [activeApp, setActiveApp] = useState<AppId>(getInitialApp);
+  const [activeCustomAppId, setActiveCustomAppId] = useState<string | null>(
+    null,
+  );
   const sharedFeatureApp = sharedFeatureAppOf(activeApp);
   const [currentView, setCurrentView] = useState<View>(() => {
     const stored = readStoredView();
@@ -210,6 +216,12 @@ function App() {
   }, [currentView]);
 
   const { data: settingsData } = useSettingsQuery();
+  const { data: customApps = [], isLoading: customAppsLoading } =
+    useCustomAppsQuery();
+  const activeCustomApp = useMemo(
+    () => customApps.find((app) => app.id === activeCustomAppId) ?? null,
+    [customApps, activeCustomAppId],
+  );
   // Windows 一律去掉系统标题栏，用页头里的应用内窗口按钮；Linux 由设置决定
   const useAppWindowControls =
     isWindows() || (isLinux() && (settingsData?.useAppWindowControls ?? false));
@@ -685,10 +697,29 @@ function App() {
     if (managementBusyRef.current) return;
     if (confirmLeave(() => selectApp(app))) return;
     closeProviderPanels();
+    setActiveCustomAppId(null);
     setActiveApp(app);
     localStorage.setItem(APP_STORAGE_KEY, app);
     setCurrentView("providers");
   };
+
+  const selectCustomApp = (app: CustomApp) => {
+    if (managementBusyRef.current) return;
+    if (confirmLeave(() => selectCustomApp(app))) return;
+    closeProviderPanels();
+    setActiveCustomAppId(app.id);
+    setCurrentView("customAppProviders");
+  };
+
+  useEffect(() => {
+    if (
+      currentView === "customAppProviders" &&
+      !customAppsLoading &&
+      !activeCustomApp
+    ) {
+      setCurrentView("customApps");
+    }
+  }, [currentView, customAppsLoading, activeCustomApp]);
 
   const openPage = (page: GlobalPage | "settings") => {
     if (page === "settings") {
@@ -700,6 +731,7 @@ function App() {
     if (currentViewRef.current === page) return;
     if (confirmLeave(() => openPage(page))) return;
     closeProviderPanels();
+    setActiveCustomAppId(null);
     if (page === "prompts" && currentViewRef.current !== "prompts") {
       // 提示词页默认选中侧栏里最后选的那个应用
       setPromptsApp(
@@ -1554,6 +1586,9 @@ function App() {
   };
 
   const renderContent = () => {
+    if (currentView === "customAppProviders" && activeCustomApp) {
+      return <CustomAppProvidersPage app={activeCustomApp} />;
+    }
     if (currentView === "settings") {
       return (
         <SettingsPage
@@ -1577,8 +1612,11 @@ function App() {
           activeApp={activeApp}
           view={currentView}
           visibleApps={visibleApps}
-          settingsSection={settingsSection}
+          customApps={customApps}
+          activeCustomAppId={activeCustomAppId}
           onSelectApp={selectApp}
+          onSelectCustomApp={selectCustomApp}
+          settingsSection={settingsSection}
           onSelectPage={openPageFromNav}
           onSelectSettingsSection={(section) => {
             setAppConfigScrollTarget(undefined);

@@ -1,8 +1,14 @@
 //! 自定义应用 CRUD 命令。
 
+use indexmap::IndexMap;
 use tauri::State;
 
-use crate::services::custom_apps::{CustomApp, CustomAppModel};
+use crate::provider::Provider;
+use crate::services::custom_apps::{
+    delete_custom_app_provider as delete_provider, list_custom_app_models as list_models,
+    list_custom_app_providers as list_providers, save_custom_app_provider as save_provider,
+    CustomApp, CustomAppModel,
+};
 use crate::store::AppState;
 
 #[tauri::command]
@@ -58,11 +64,31 @@ pub fn list_custom_app_models(
     state: State<'_, AppState>,
     id: String,
 ) -> Result<Vec<CustomAppModel>, String> {
-    // 路由列表只依赖固定供应商；先确认自定义应用存在，避免 UI 对已删除 app 展开空列表。
-    state
-        .db
-        .get_custom_app_by_id(&id)
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| "自定义应用不存在".to_string())?;
-    crate::services::custom_apps::list_custom_app_models(&state.db).map_err(|e| e.to_string())
+    list_models(&state.db, &id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn list_custom_app_providers(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<IndexMap<String, Provider>, String> {
+    list_providers(&state.db, &id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn save_custom_app_provider(
+    state: State<'_, AppState>,
+    id: String,
+    provider: Provider,
+) -> Result<bool, String> {
+    save_provider(&state.db, &id, &provider).map_err(|e| e.to_string())
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn delete_custom_app_provider(
+    state: State<'_, AppState>,
+    id: String,
+    provider_id: String,
+) -> Result<bool, String> {
+    delete_provider(&state.db, &id, &provider_id).map_err(|e| e.to_string())
 }

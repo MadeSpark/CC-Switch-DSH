@@ -194,10 +194,13 @@ impl Database {
         Ok(providers)
     }
 
-    /// 读取 providers 表里的全部固定应用供应商（自定义应用不拥有独立供应商）。
+    /// 读取 providers 表里的全部固定应用供应商。
     ///
-    /// 与按应用读取不同，这里只依赖单行字段；meta.custom_endpoints 由各应用自己的
-    /// 读取路径补齐，模型聚合和精确路由都不需要它。
+    /// 自定义应用使用 `custom:<app_id>` 作为 app_type，不属于固定应用；
+    /// 与按应用读取不同，这里只依赖单行字段；meta.custom_endpoints 由各应用
+    /// 自己的读取路径补齐。保留此固定应用聚合边界，测试用它锁定自定义应用
+    /// provider 不会泄漏到固定应用查询。
+    #[allow(dead_code)]
     pub(crate) fn get_all_providers_cross_app(
         &self,
     ) -> Result<Vec<(crate::app_config::AppType, Provider)>, AppError> {
@@ -244,6 +247,9 @@ impl Database {
         let mut providers = Vec::new();
         for row in rows {
             let (app_type, provider) = row.map_err(|e| AppError::Database(e.to_string()))?;
+            if app_type.starts_with("custom:") {
+                continue;
+            }
             match app_type.parse::<crate::app_config::AppType>() {
                 Ok(app_type) => providers.push((app_type, provider)),
                 Err(_) => log::warn!(
@@ -254,6 +260,95 @@ impl Database {
             }
         }
         Ok(providers)
+    }
+
+    /// 读取某个自定义应用自己的供应商。
+    pub(crate) fn get_custom_app_providers(
+        &self,
+        app_type: &str,
+    ) -> Result<IndexMap<String, Provider>, AppError> {
+        let conn = lock_conn!(self.conn);
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, name, settings_config, created_at, sort_index
+                 FROM providers
+                 WHERE app_type = ?1
+                 ORDER BY COALESCE(sort_index, 999999), created_at ASC, id ASC",
+            )
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        let rows = stmt
+            .query_map(params![app_type], |row| {
+                let id: String = row.get(0)?;
+                let name: String = row.get(1)?;
+                let settings_config_str: String = row.get(2)?;
+                Ok(Provider {
+                    id,
+                    name,
+                    settings_config: serde_json::from_str(&settings_config_str)
+                        .unwrap_or(serde_json::Value::Null),
+                    website_url: None,
+                    category: None,
+                    created_at: row.get(3)?,
+                    sort_index: row.get(4)?,
+                    notes: None,
+                    meta: None,
+                    icon: None,
+                    icon_color: None,
+                    in_failover_queue: false,
+                })
+            })
+            .map_err(|e| AppError::Database(e.to_string()))?;
+
+        rows.map(|row| row.map(|provider| (provider.id.clone(), provider)))
+            .map(|row| row.map_err(|e| AppError::Database(e.to_string())))
+            .collect()
+    }
+
+    /// 新增/更新自定义应用供应商。只写 providers 表的自定义应用行。
+    pub(crate) fn save_custom_app_provider(
+        &self,
+        app_type: &str,
+        provider: &Provider,
+    ) -> Result<(), AppError> {
+        let conn = lock_conn!(self.conn);
+        let settings_config = serde_json::to_string(&provider.settings_config)
+            .map_err(|e| AppError::Database(format!("Failed to serialize settings_config: {e}")))?;
+        let now = chrono::Utc::now().timestamp_millis();
+        conn.execute(
+            "INSERT INTO providers (
+                id, app_type, name, settings_config, created_at, meta, is_current, in_failover_queue
+             ) VALUES (?1, ?2, ?3, ?4, ?5, '{}', 0, 0)
+             ON CONFLICT(id, app_type) DO UPDATE SET
+                name = excluded.name,
+                settings_config = excluded.settings_config,
+                website_url = NULL,
+                category = NULL,
+                notes = NULL,
+                icon = NULL,
+                icon_color = NULL,
+                meta = '{}',
+                is_current = 0,
+                in_failover_queue = 0",
+            params![provider.id, app_type, provider.name, settings_config, now],
+        )
+        .map_err(|e| AppError::Database(e.to_string()))?;
+        Ok(())
+    }
+
+    /// 删除自定义应用供应商；返回是否真的删除了行。
+    pub(crate) fn delete_custom_app_provider(
+        &self,
+        app_type: &str,
+        provider_id: &str,
+    ) -> Result<bool, AppError> {
+        let conn = lock_conn!(self.conn);
+        let affected = conn
+            .execute(
+                "DELETE FROM providers WHERE id = ?1 AND app_type = ?2",
+                params![provider_id, app_type],
+            )
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        Ok(affected > 0)
     }
 
     pub fn get_current_provider(&self, app_type: &str) -> Result<Option<String>, AppError> {

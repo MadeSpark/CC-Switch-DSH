@@ -206,25 +206,6 @@ pub fn extract_model_config(config_toml: &str) -> Option<GrokModelConfig> {
     })
 }
 
-/// 从 `[model.<name>]` 表键提取模型名。解析失败或没有模型表时返回空列表。
-pub(crate) fn published_models(config_toml: &str) -> Vec<String> {
-    let Ok(document) = config_toml.parse::<toml::Value>() else {
-        return Vec::new();
-    };
-    document
-        .get("model")
-        .and_then(toml::Value::as_table)
-        .map(|models| {
-            models
-                .keys()
-                .map(|model| model.trim())
-                .filter(|model| !model.is_empty())
-                .map(ToString::to_string)
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
 pub fn extract_credentials(config_toml: &str) -> Option<(String, String)> {
     let config = extract_model_config(config_toml)?;
     // Credentials only come from two explicit, config-declared sources:
