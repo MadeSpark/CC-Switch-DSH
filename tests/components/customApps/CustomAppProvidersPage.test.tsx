@@ -1,4 +1,3 @@
-import type { ReactElement } from "react";
 import { createElement } from "react";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -202,9 +201,7 @@ describe("CustomAppProvidersPage 新建供应商", () => {
   });
 
   it("完整表单提交调用 saveCustomAppProvider", async () => {
-    vi.mocked(customAppsApi.saveCustomAppProvider).mockResolvedValue(
-      {} as Record<string, Provider>,
-    );
+    vi.mocked(customAppsApi.saveCustomAppProvider).mockResolvedValue(true);
     renderPage();
     await userEvent.click(
       await screen.findByRole("button", { name: "添加供应商" }),
@@ -243,9 +240,7 @@ describe("CustomAppProvidersPage 新建供应商", () => {
 
 describe("CustomAppProvidersPage 编辑与删除", () => {
   it("编辑：弹窗预填并保存调用 saveCustomAppProvider", async () => {
-    vi.mocked(customAppsApi.saveCustomAppProvider).mockResolvedValue(
-      {} as Record<string, Provider>,
-    );
+    vi.mocked(customAppsApi.saveCustomAppProvider).mockResolvedValue(true);
     renderPage();
     await userEvent.click(await screen.findByRole("button", { name: "编辑" }));
     const idInput = await screen.findByLabelText("供应商标识");
@@ -264,7 +259,7 @@ describe("CustomAppProvidersPage 编辑与删除", () => {
   });
 
   it("删除：确认后调用 deleteCustomAppProvider", async () => {
-    vi.mocked(customAppsApi.deleteCustomAppProvider).mockResolvedValue(true as never);
+    vi.mocked(customAppsApi.deleteCustomAppProvider).mockResolvedValue(true);
     renderPage();
     expect(await screen.findByText("供应商A")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "删除" }));
