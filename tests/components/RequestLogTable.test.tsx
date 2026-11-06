@@ -11,6 +11,11 @@ import { REQUEST_LOG_COLUMNS } from "@/components/usage/requestLogColumns";
 import type { UsageRangeSelection } from "@/types/usage";
 
 const useRequestLogsMock = vi.hoisted(() => vi.fn());
+const useCustomAppsQueryMock = vi.hoisted(() => vi.fn());
+
+vi.mock("@/lib/query/customApps", () => ({
+  useCustomAppsQuery: () => useCustomAppsQueryMock(),
+}));
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -34,6 +39,8 @@ vi.mock("@/lib/query/usage", () => ({
 describe("RequestLogTable", () => {
   beforeEach(() => {
     useRequestLogsMock.mockReset();
+    useCustomAppsQueryMock.mockReset();
+    useCustomAppsQueryMock.mockReturnValue({ data: [] });
     useRequestLogsMock.mockImplementation(
       ({ page = 0, pageSize = 20 }: { page?: number; pageSize?: number }) => ({
         data: {
@@ -312,6 +319,87 @@ describe("RequestLogTable", () => {
     expect(appCell).toHaveTextContent("Claude");
     expect(appShortName("claude-desktop")).toBe("Desktop");
     expect(appShortName("unknown-app")).toBe("unknown-app");
+  });
+
+  it("shows custom app names for custom appType ids and falls back to the raw id", () => {
+    const customAppId = "custom-8fa21cfe-1111-2222-3333-444455556666";
+    useCustomAppsQueryMock.mockReturnValue({
+      data: [
+        {
+          id: customAppId,
+          name: "爱丽",
+          icon: "claude",
+          iconColor: null,
+          apiKey: "sk-test",
+          createdAt: 1_700_000_000,
+          updatedAt: 1_700_000_000,
+        },
+      ],
+    });
+    useRequestLogsMock.mockReturnValue({
+      data: {
+        data: [
+          {
+            requestId: "r-custom",
+            providerId: "p1",
+            providerName: "DeepSeek",
+            appType: customAppId,
+            model: "deepseek-v4-pro",
+            costMultiplier: "1",
+            inputTokens: 10,
+            outputTokens: 10,
+            cacheReadTokens: 0,
+            cacheCreationTokens: 0,
+            inputCostUsd: "0",
+            outputCostUsd: "0",
+            cacheReadCostUsd: "0",
+            cacheCreationCostUsd: "0",
+            totalCostUsd: "0",
+            isStreaming: false,
+            statusCode: 200,
+            latencyMs: 0,
+            createdAt: Math.floor(Date.now() / 1000),
+          },
+          {
+            requestId: "r-deleted",
+            providerId: "p1",
+            providerName: "DeepSeek",
+            appType: "custom-deleted-app",
+            model: "m",
+            costMultiplier: "1",
+            inputTokens: 10,
+            outputTokens: 10,
+            cacheReadTokens: 0,
+            cacheCreationTokens: 0,
+            inputCostUsd: "0",
+            outputCostUsd: "0",
+            cacheReadCostUsd: "0",
+            cacheCreationCostUsd: "0",
+            totalCostUsd: "0",
+            isStreaming: false,
+            statusCode: 200,
+            latencyMs: 0,
+            createdAt: Math.floor(Date.now() / 1000),
+          },
+        ],
+        total: 2,
+        page: 0,
+        pageSize: 20,
+      },
+      isLoading: false,
+    });
+
+    render(
+      <RequestLogTable range={{ preset: "today" }} refreshIntervalMs={0} />,
+    );
+
+    // 自定义应用：显示名字 + 自己的小图标
+    // ProviderIconBox 的 title 和单元格的 title 同为应用名，可能命中多个
+    const namedCell = screen.getAllByTitle("爱丽")[0];
+    expect(namedCell).toHaveTextContent("爱丽");
+    // 已删除 / 未知自定义应用：回退到原始 id
+    const fallbackCell = screen.getAllByTitle("custom-deleted-app")[0];
+    expect(fallbackCell).toHaveTextContent("custom-deleted-app");
   });
 });
 

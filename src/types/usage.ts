@@ -245,7 +245,15 @@ export type AppType =
   | "mcode"
   | "dsh";
 
-export type AppTypeFilter = "all" | AppType;
+/** 自定义应用的 appType 是后端生成的 `custom-{uuid}`（custom_apps.rs 用 `format!("custom-{}", uuid)`） */
+export type CustomAppTypeFilter = `custom-${string}`;
+
+export type AppTypeFilter = "all" | AppType | CustomAppTypeFilter;
+
+/** 运行时守卫：自定义应用 id 一定带 custom- 前缀，用于把 string 收窄成 CustomAppTypeFilter */
+export const isCustomAppTypeId = (
+  value: string,
+): value is CustomAppTypeFilter => value.startsWith("custom-");
 
 export const KNOWN_APP_TYPES: ReadonlyArray<AppType> = [
   "claude",

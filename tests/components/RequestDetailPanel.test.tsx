@@ -1,10 +1,15 @@
 import { fireEvent, screen } from "@testing-library/react";
 import { renderWithQueryClient as render } from "../utils/testQueryClient";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { RequestDetailPanel } from "@/components/usage/RequestDetailPanel";
 import type { RequestLog } from "@/types/usage";
 
 const useRequestDetailMock = vi.hoisted(() => vi.fn());
+const useCustomAppsQueryMock = vi.hoisted(() => vi.fn());
+
+vi.mock("@/lib/query/customApps", () => ({
+  useCustomAppsQuery: () => useCustomAppsQueryMock(),
+}));
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -50,6 +55,11 @@ const renderWith = (request: RequestLog) => {
 };
 
 describe("RequestDetailPanel", () => {
+  beforeEach(() => {
+    useCustomAppsQueryMock.mockReset();
+    useCustomAppsQueryMock.mockReturnValue({ data: [] });
+  });
+
   it("shows speed, first token and duration for routed requests", () => {
     renderWith(log({}));
 
@@ -172,5 +182,33 @@ describe("RequestDetailPanel", () => {
 
     expect(screen.getByText("usage.requestNotFound")).toBeInTheDocument();
     expect(screen.queryByText("usage.requestLoadFailed")).toBeNull();
+  });
+
+  it("shows custom app names for custom appType ids and falls back to the raw id", () => {
+    const customAppId = "custom-8fa21cfe-1111-2222-3333-444455556666";
+    useCustomAppsQueryMock.mockReturnValue({
+      data: [
+        {
+          id: customAppId,
+          name: "爱丽",
+          icon: "claude",
+          iconColor: null,
+          apiKey: "sk-test",
+          createdAt: 1_700_000_000,
+          updatedAt: 1_700_000_000,
+        },
+      ],
+    });
+
+    renderWith(log({ appType: customAppId }));
+
+    // 基本信息里的「应用」行和抽屉副标题都显示自定义应用的名字
+    expect(screen.getByText("爱丽")).toBeInTheDocument();
+  });
+
+  it("keeps the raw id for unknown custom app types", () => {
+    renderWith(log({ appType: "custom-deleted-app" }));
+
+    expect(screen.getByText("custom-deleted-app")).toBeInTheDocument();
   });
 });

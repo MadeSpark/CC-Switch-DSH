@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { AppPageHeader } from "@/components/shell/AppPageHeader";
 import { AppGlyph } from "@/components/shell/AppGlyph";
+import { ProviderIconBox } from "@/components/ProviderIconBox";
 import { HelpTip } from "@/components/ui/help-tip";
 import { PageTabs } from "@/components/ui/page-tabs";
 import { Button } from "@/components/ui/button";
@@ -29,6 +30,7 @@ import {
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import {
   KNOWN_APP_TYPES,
+  isCustomAppTypeId,
   type AppTypeFilter,
   type UsageGranularity,
   type UsageRangePreset,
@@ -40,6 +42,7 @@ import {
   useProviderStats,
   useSessionUsageLastSync,
 } from "@/lib/query/usage";
+import { useCustomAppsQuery } from "@/lib/query/customApps";
 import { useUsageEventBridge } from "@/hooks/useUsageEventBridge";
 import { useUsageAutoRefresh } from "@/hooks/useUsageAutoRefresh";
 import { usageApi } from "@/lib/api/usage";
@@ -244,6 +247,7 @@ export function UsageDashboard({
   const { data: lastScanAt } = useSessionUsageLastSync({
     refetchInterval: false,
   });
+  const { data: customApps } = useCustomAppsQuery();
   const { syncSessionUsage } = useUsageAutoRefresh({
     refreshIntervalMs,
     sessionAutoSyncEnabled,
@@ -269,6 +273,25 @@ export function UsageDashboard({
     setProviderName(undefined);
     setModel(undefined);
   }, [initialAppType]);
+
+  // 自定义应用可能被删除：选中的（或 initialAppType 带进来的）custom id 不在列表里时回落到「全部」。
+  // 内置应用不走这个兜底，因为内置 id 永远存在。
+  const selectedCustomApp = useMemo(
+    () =>
+      isCustomAppTypeId(appType)
+        ? customApps?.find((app) => app.id === appType)
+        : undefined,
+    [appType, customApps],
+  );
+  useEffect(() => {
+    if (
+      isCustomAppTypeId(appType) &&
+      customApps != null &&
+      !selectedCustomApp
+    ) {
+      setAppType("all");
+    }
+  }, [appType, customApps, selectedCustomApp]);
 
   // 切应用时清掉下游筛选，避免留下一个在新范围内查无数据的"幽灵"组合；
   // 切供应商同理清掉模型（模型选项随供应商级联）。
@@ -578,6 +601,31 @@ export function UsageDashboard({
                 app={APP_TYPE_BRAND[app]}
                 size={16}
                 badgeClassName={appType === app ? "bg-surface" : "bg-subtle"}
+              />
+            </button>
+          </HoverTip>
+        ))}
+        {/* 自定义应用：按 id 过滤（日志行的 appType 就是 custom-{uuid}），图标同请求日志里的画法 */}
+        {(customApps ?? []).map((app) => (
+          <HoverTip key={app.id} content={app.name}>
+            <button
+              type="button"
+              aria-pressed={appType === app.id}
+              aria-label={app.name}
+              className={cn(
+                chipClass(appType === app.id),
+                "w-[30px] justify-center px-0",
+              )}
+              onClick={() =>
+                changeAppType(isCustomAppTypeId(app.id) ? app.id : "all")
+              }
+            >
+              <ProviderIconBox
+                icon={app.icon}
+                name={app.name}
+                color={app.iconColor ?? undefined}
+                className="h-4 w-4 rounded-[4px] border-0"
+                iconClassName="!h-3.5 !w-3.5"
               />
             </button>
           </HoverTip>

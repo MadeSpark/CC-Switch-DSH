@@ -4,6 +4,7 @@ import { useRequestLogs } from "@/lib/query/usage";
 import { TablePagination } from "./TablePagination";
 import { HelpTip } from "@/components/ui/help-tip";
 import { AppGlyph, APP_DISPLAY_NAME } from "@/components/shell/AppGlyph";
+import { ProviderIconBox } from "@/components/ProviderIconBox";
 import type { AppId } from "@/lib/api";
 import {
   CACHE_INCLUSIVE_APP_TYPES,
@@ -32,6 +33,7 @@ import {
   resolveRequestLogColumns,
   type RequestLogColumnId,
 } from "./requestLogColumns";
+import { useAppNameResolver } from "./useAppNameResolver";
 
 interface RequestLogTableProps {
   range: UsageRangeSelection;
@@ -170,6 +172,11 @@ export function RequestLogTable({
   const { t, i18n } = useTranslation();
   const { money, usdHint } = useMoneyFormat();
   const { tokens } = useTokenFormat();
+  const {
+    displayName: resolveAppName,
+    shortName: resolveAppShortName,
+    customApp: resolveCustomApp,
+  } = useAppNameResolver();
   const [page, setPage] = useState(0);
   const pageSize = 20;
 
@@ -324,26 +331,40 @@ export function RequestLogTable({
           )}
         </td>
       ),
-      app: (
-        <td className={cn(usageTable.td, "w-px")}>
-          <span
-            className="flex max-w-[88px] items-center gap-1.5"
-            title={appDisplayName(log.appType)}
-          >
-            {isKnownAppId(log.appType) && (
-              <AppGlyph
-                app={log.appType}
-                size={14}
-                badgeClassName="bg-surface"
-              />
-            )}
-            <span className="truncate" aria-hidden="true">
-              {appShortName(log.appType)}
+      app: (() => {
+        const customApp = resolveCustomApp(log.appType);
+        const displayName = resolveAppName(log.appType);
+        return (
+          <td className={cn(usageTable.td, "w-px")}>
+            <span
+              className="flex max-w-[88px] items-center gap-1.5"
+              title={displayName}
+            >
+              {customApp ? (
+                <ProviderIconBox
+                  icon={customApp.icon}
+                  name={customApp.name}
+                  color={customApp.iconColor ?? undefined}
+                  className="h-4 w-4 rounded-[4px] border-0"
+                  iconClassName="!h-3.5 !w-3.5"
+                />
+              ) : (
+                isKnownAppId(log.appType) && (
+                  <AppGlyph
+                    app={log.appType}
+                    size={14}
+                    badgeClassName="bg-surface"
+                  />
+                )
+              )}
+              <span className="truncate" aria-hidden="true">
+                {resolveAppShortName(log.appType)}
+              </span>
+              <span className="sr-only">{displayName}</span>
             </span>
-            <span className="sr-only">{appDisplayName(log.appType)}</span>
-          </span>
-        </td>
-      ),
+          </td>
+        );
+      })(),
       // 供应商、模型两列按比例取宽（max-w-0 让百分比宽度生效、内容截断）；
       // 比例合计 32%：40% 时常见窗口下数值列就只剩内容宽度，左松右挤。模型名通常比供应商名长，
       // 放不下的截断、悬停看全名

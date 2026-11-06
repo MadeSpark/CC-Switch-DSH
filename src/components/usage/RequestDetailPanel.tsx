@@ -29,7 +29,7 @@ import {
   getResolvedLang,
   parseFiniteNumber,
 } from "./format";
-import { appDisplayName } from "./RequestLogTable";
+import { useAppNameResolver } from "./useAppNameResolver";
 import { getUsageProviderLabel } from "./providerLabel";
 
 interface RequestDetailPanelProps {
@@ -86,6 +86,7 @@ function DetailSection({ title, rows }: { title: string; rows: DetailRow[] }) {
 function useDetailSections(request: RequestLog) {
   const { t, i18n } = useTranslation();
   const { money, moneyTitle } = useMoneyFormat();
+  const { displayName: resolveAppName } = useAppNameResolver();
   const usd = (value: string) => money(value, 4);
   const locale = getLocaleFromLanguage(getResolvedLang(i18n));
   const freshInput = getFreshInputTokens(request);
@@ -107,7 +108,7 @@ function useDetailSections(request: RequestLog) {
     {
       key: "app",
       label: t("usage.app"),
-      value: appDisplayName(request.appType),
+      value: resolveAppName(request.appType),
     },
     {
       key: "provider",
@@ -360,11 +361,12 @@ export function RequestDetailPanel({
     error,
     refetch,
   } = useRequestDetail(requestId ?? "");
+  const { displayName: resolveAppName } = useAppNameResolver();
 
   const subtitle = request
     ? [
         new Date(request.createdAt * 1000).toLocaleString(),
-        appDisplayName(request.appType),
+        resolveAppName(request.appType),
         getUsageProviderLabel(request.providerName, t).shortLabel,
       ].join(" · ")
     : undefined;
