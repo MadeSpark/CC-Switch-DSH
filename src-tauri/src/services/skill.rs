@@ -7050,9 +7050,22 @@ mod tests {
                 }
             }
         }
+        // DSH 的技能目录先看 `DSH_HOME`：开发机/CI 里该变量常常指向真实的
+        // `~/.dsh`，不清掉就会把断言带到真实用户目录上（与上面同一类隔离失效）。
+        struct DshHomeGuard(Option<std::ffi::OsString>);
+        impl Drop for DshHomeGuard {
+            fn drop(&mut self) {
+                match self.0.take() {
+                    Some(value) => std::env::set_var("DSH_HOME", value),
+                    None => std::env::remove_var("DSH_HOME"),
+                }
+            }
+        }
         let temp = tempdir().expect("tempdir");
         let _guard = EnvGuard(std::env::var_os("CC_SWITCH_TEST_HOME"));
+        let _dsh_guard = DshHomeGuard(std::env::var_os("DSH_HOME"));
         std::env::set_var("CC_SWITCH_TEST_HOME", temp.path());
+        std::env::remove_var("DSH_HOME");
 
         let dir =
             SkillService::get_app_skills_dir(&AppType::Claude).expect("resolve claude skills dir");

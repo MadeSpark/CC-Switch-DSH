@@ -261,6 +261,29 @@ fn runtime_log_level_allows(level: log::Level, max_level: log::LevelFilter) -> b
     max_level.to_level().is_some_and(|maximum| level <= maximum)
 }
 
+/// 构建日志输出目标。
+///
+/// 生产构建（release）默认 **不挂 stdout**：fern 在任一输出写入失败、且 stderr
+/// 兜底同样失败时会直接 `panic!`（fern-0.7.1/src/log_impl.rs:896）。Windows GUI
+/// 进程若由已退出的启动器/脚本经管道拉起，stdout 管道会变成「对端已关闭」，第一条
+/// 日志就触发该 panic 并终止整个进程（0xC0000409 / FAST_FAIL_FATAL_APP_EXIT，
+/// 崩溃转储里只剩那条 INFO 记录，业务日志一条都没有）。文件日志才是产品日志通道，
+/// stdout 仅在调试构建或显式设置 `CC_SWITCH_LOG_STDOUT=1` 时附加。
+fn build_log_targets(log_dir: std::path::PathBuf) -> Vec<tauri_plugin_log::Target> {
+    use tauri_plugin_log::{Target, TargetKind};
+
+    let mut targets = vec![Target::new(TargetKind::Folder {
+        path: log_dir,
+        file_name: Some("cc-switch".into()),
+    })];
+
+    if cfg!(debug_assertions) || std::env::var_os("CC_SWITCH_LOG_STDOUT").is_some() {
+        targets.push(Target::new(TargetKind::Stdout));
+    }
+
+    targets
+}
+
 /// 统一处理 ccswitch:// 深链接 URL
 ///
 /// - 解析 URL，把结果（或错误）暂存为待处理深链接，再发 `deeplink-pending` 通知前端来读
@@ -476,7 +499,7 @@ pub fn run() {
 
             // 初始化日志（输出到 <app_config_dir>/logs/cc-switch.log）
             {
-                use tauri_plugin_log::{RotationStrategy, Target, TargetKind, TimezoneStrategy};
+                use tauri_plugin_log::{RotationStrategy, TimezoneStrategy};
 
                 let log_dir = panic_hook::get_log_dir();
 
@@ -495,13 +518,7 @@ pub fn run() {
                         .filter(|metadata| {
                             runtime_log_level_allows(metadata.level(), log::max_level())
                         })
-                        .targets([
-                            Target::new(TargetKind::Stdout),
-                            Target::new(TargetKind::Folder {
-                                path: log_dir,
-                                file_name: Some("cc-switch".into()),
-                            }),
-                        ])
+                        .targets(build_log_targets(log_dir))
                         // KeepSome(4) 保留 4 个轮转归档，加上当前文件最多约 100 MiB。
                         // 轮转仅按大小触发；跨重启继续追加，不再丢失上一次运行的日志。
                         .rotation_strategy(RotationStrategy::KeepSome(4))
@@ -1569,6 +1586,12 @@ pub fn run() {
             // theirs: config import/export and dialogs
             commands::export_config_to_file,
             commands::import_config_from_file,
+            commands::get_selective_export_catalog,
+            commands::export_selective_config,
+            commands::read_selective_import_file,
+            commands::import_selective_config,
+            commands::save_json_file_dialog,
+            commands::open_json_file_dialog,
             commands::webdav_test_connection,
             commands::webdav_sync_upload,
             commands::webdav_sync_download,
