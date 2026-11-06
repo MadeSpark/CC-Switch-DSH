@@ -346,23 +346,40 @@ pub fn set_pi_ai_provider(provider_id: &str, config: &Value) -> Result<(), AppEr
     let route_config = Value::Object(config);
     let path = get_patch_path();
     let path_label = path.display().to_string();
+    let repair_path = path.clone();
     update_patch_entry_config(&path, PI_AI_NAMESPACE, PI_AI_ENTRY_NAME, move |entry| {
         let providers = entry
             .entry("providers".to_string())
             .or_insert_with(|| Value::Object(serde_json::Map::new()));
-        // A Harness build that saved no custom route can leave the key empty
-        // (`providers:` with no children, an empty list, or a blank string). All of
-        // them spell "no providers", so repair the shape instead of refusing to write.
-        if spells_no_providers(providers) {
-            *providers = Value::Object(serde_json::Map::new());
+        // The Harness itself can leave `providers` in a shape its loader rejects:
+        // `providers:` with no children (Null), an empty list, a blank string, or a
+        // list/mapping spelled out as text. Writing through it would just move the
+        // failure to the Harness, so normalise the value here.
+        if !providers.is_object() {
+            let original = providers.clone();
+            match salvage_providers(&original) {
+                Some(recovered) => {
+                    log::warn!(
+                        "DeepSeek Harness: rewriting text-encoded `providers` in {path_label}"
+                    );
+                    *providers = Value::Object(recovered);
+                }
+                None => {
+                    log::warn!(
+                        "DeepSeek Harness: repairing {} `providers` in {path_label}: {}",
+                        describe_value_kind(&original),
+                        describe_sample(&original),
+                    );
+                    if !spells_no_providers(&original) {
+                        keep_repaired_value(&repair_path, &original);
+                    }
+                    *providers = Value::Object(serde_json::Map::new());
+                }
+            }
         }
-        let providers_kind = describe_value_kind(providers);
-        let providers = providers.as_object_mut().ok_or_else(|| {
-            AppError::Config(format!(
-                "DeepSeek Harness patch entry {PI_AI_NAMESPACE} has a non-mapping `providers` value ({} in {path_label}): edit that entry to a mapping such as `providers: {{}}` and retry",
-                providers_kind,
-            ))
-        })?;
+        let providers = providers
+            .as_object_mut()
+            .expect("providers was normalised to a mapping above");
         providers.insert(provider_id.to_string(), route_config.clone());
         Ok(())
     })
@@ -388,6 +405,47 @@ fn describe_value_kind(value: &Value) -> &'static str {
         Value::Object(_) => "mapping",
     }
 }
+
+/// Recover a mapping the Harness stored as text (`providers: "{}"`).
+fn salvage_providers(value: &Value) -> Option<serde_json::Map<String, Value>> {
+    let text = value.as_str()?.trim();
+    if text.is_empty() {
+        return Some(serde_json::Map::new());
+    }
+    let parsed: Value = serde_yaml::from_str(text)
+        .ok()
+        .or_else(|| serde_json::from_str(text).ok())?;
+    parsed.as_object().cloned()
+}
+
+/// One-line, length-capped rendering of a value for the log.
+fn describe_sample(value: &Value) -> String {
+    let text = value.to_string();
+    let mut sample: String = text.chars().take(160).collect();
+    if text.chars().count() > 160 {
+        sample.push('…');
+    }
+    sample.replace('\n', " ")
+}
+
+/// Keep the value we are about to drop next to the patch file it came from.
+fn keep_repaired_value(path: &Path, value: &Value) {
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs())
+        .unwrap_or_default();
+    let backup = PathBuf::from(format!("{}.providers-{stamp}.bak", path.display()));
+    let body = format!(
+        "# CC Switch replaced a non-mapping `providers` value with {{}}\n# original value:\n{value}\n"
+    );
+    if let Err(error) = fs::write(&backup, body) {
+        log::warn!(
+            "DeepSeek Harness: could not keep the replaced providers value at {}: {error}",
+            backup.display()
+        );
+    }
+}
+
 
 pub fn remove_pi_ai_provider(provider_id: &str) -> Result<(), AppError> {
     validate_route_id(provider_id)?;
@@ -1079,7 +1137,7 @@ mod tests {
 
     #[test]
     #[serial]
-    fn rejects_pi_ai_providers_that_hold_data_in_a_non_mapping_shape() {
+    fn replaces_pi_ai_providers_holding_a_non_mapping_value_and_keeps_a_copy() {
         with_temp_home(|home| {
             seed_patch(
                 home,
@@ -1088,11 +1146,16 @@ mod tests {
             std::fs::write(home.join(".credentials.yaml"), "version: 1\nrefs: {}\n").unwrap();
 
             let config = serde_json::json!({ "displayName": "DeepSeek" });
-            let error = set_pi_ai_provider("direct", &config).unwrap_err();
-            let message = error.to_string();
-            assert!(message.contains("non-mapping"), "{message}");
-            assert!(message.contains("list"), "{message}");
-            assert!(message.contains("cordis.patch.yml"), "{message}");
+            set_pi_ai_provider("direct", &config).unwrap();
+
+            let patch = read_patch(home);
+            assert!(patch.contains("direct"), "{patch}");
+            let kept = std::fs::read_dir(home.join("profiles/desktop"))
+                .unwrap()
+                .filter_map(Result::ok)
+                .map(|entry| entry.file_name().to_string_lossy().to_string())
+                .find(|name| name.contains(".providers-") && name.ends_with(".bak"));
+            assert!(kept.is_some(), "the dropped value should be kept next to the patch");
         });
     }
 }
