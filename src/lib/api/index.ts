@@ -13,6 +13,19 @@ export { vscodeApi } from "./vscode";
 export { proxyApi } from "./proxy";
 export { customAppsApi } from "./customApps";
 export type { CustomApp, CustomAppModel } from "./customApps";
+export { selectiveConfigApi } from "./selectiveConfig";
+export type {
+  CatalogItem,
+  CatalogAppGroup,
+  CatalogCustomApp,
+  SelectiveCatalog,
+  SelectiveSelection,
+  SelectiveImportMode,
+  SelectiveImportPreview,
+  SectionResult,
+  SelectiveImportSummary,
+  SelectiveExportResult,
+} from "./selectiveConfig";
 export { openclawApi } from "./openclaw";
 export { sessionsApi } from "./sessions";
 export { workspaceApi } from "./workspace";

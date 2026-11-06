@@ -36,6 +36,7 @@ import { AppPageHeader } from "@/components/shell/AppPageHeader";
 import { DirectoryInput } from "@/components/settings/DirectorySettings";
 import { ImportExportSection } from "@/components/settings/ImportExportSection";
 import { BackupListSection } from "@/components/settings/BackupListSection";
+import { SelectiveConfigSection } from "@/components/settings/selective-config/SelectiveConfigSection";
 import { WebdavSyncSection } from "@/components/settings/WebdavSyncSection";
 import { AboutSection } from "@/components/settings/AboutSection";
 import { RoutingSection } from "@/components/settings/sections/RoutingSection";
@@ -476,6 +477,9 @@ export function SettingsPage({
                   onExport={exportConfig}
                   onClear={clearSelection}
                 />
+              </div>
+              <div className="rounded-panel border border-border bg-surface p-5">
+                <SelectiveConfigSection />
               </div>
             </SettingsBlock>
             <SettingsBlock

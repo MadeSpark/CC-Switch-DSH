@@ -224,6 +224,97 @@ fn write_file_unlocked(file: &ModelPricingFile) -> Result<(), AppError> {
     atomic_write(&path, &data)
 }
 
+/// Snapshot of the local override file taken before a selective import writes it.
+///
+/// Keeping the raw bytes lets a failed import restore the exact pre-import
+/// state, including formatting and tombstones that were not part of the merge.
+#[derive(Debug)]
+pub struct LocalPricingFileSnapshot {
+    path: PathBuf,
+    previous: Option<Vec<u8>>,
+}
+
+fn write_file_at_path(path: &std::path::Path, file: &ModelPricingFile) -> Result<(), AppError> {
+    let mut data = serde_json::to_vec_pretty(file)
+        .map_err(|error| AppError::Config(format!("序列化模型定价配置失败: {error}")))?;
+    data.push(b'\n');
+    atomic_write(path, &data)
+}
+
+/// Proof that the caller holds the model-pricing file lock.
+///
+/// Lock order everywhere in this module is file lock first, then `db.conn`
+/// (see `sync_local_model_pricing` and `update_model_pricing_batch`). Callers
+/// that also need the database connection must take this guard *before*
+/// locking the connection, otherwise they can deadlock with those paths.
+pub struct LocalPricingFileGuard {
+    _guard: std::sync::MutexGuard<'static, ()>,
+}
+
+pub fn lock_local_pricing_file() -> Result<LocalPricingFileGuard, AppError> {
+    let guard = file_lock()
+        .lock()
+        .map_err(|error| AppError::Config(format!("模型定价文件锁失败: {error}")))?;
+    Ok(LocalPricingFileGuard { _guard: guard })
+}
+
+/// Merge imported override entries into `model-pricing.json` before the import
+/// transaction starts. Existing entries with the same model ID are replaced and
+/// those IDs are removed from the deletion tombstone list. The caller must hold
+/// the file lock via [`lock_local_pricing_file`].
+pub fn merge_entries_into_local_pricing_file(
+    _file_guard: &LocalPricingFileGuard,
+    entries: &[ModelPricingInfo],
+) -> Result<Option<LocalPricingFileSnapshot>, AppError> {
+    if entries.is_empty() {
+        return Ok(None);
+    }
+
+    let path = model_pricing_file_path();
+    let previous = if path.exists() {
+        Some(fs::read(&path).map_err(|error| AppError::io(&path, error))?)
+    } else {
+        None
+    };
+
+    let mut file = match previous.as_ref() {
+        Some(bytes) => serde_json::from_slice(bytes)
+            .map_err(|error| AppError::json(&path, error))
+            .and_then(normalize_file)?,
+        None => ModelPricingFile::default(),
+    };
+
+    for entry in entries {
+        let entry = normalize_pricing(entry.clone())?;
+        file.models
+            .retain(|existing| existing.model_id != entry.model_id);
+        file.deleted_model_ids
+            .retain(|model_id| model_id != &entry.model_id);
+        file.models.push(entry);
+    }
+    let file = normalize_file(file)?;
+    write_file_at_path(&path, &file)?;
+
+    Ok(Some(LocalPricingFileSnapshot { path, previous }))
+}
+
+/// Restore the exact local override file captured by
+/// [`merge_entries_into_local_pricing_file`]. If the file did not exist before
+/// the merge, remove the newly created file.
+pub fn restore_local_pricing_file(
+    _file_guard: &LocalPricingFileGuard,
+    snapshot: LocalPricingFileSnapshot,
+) -> Result<(), AppError> {
+    match snapshot.previous {
+        Some(bytes) => atomic_write(&snapshot.path, &bytes),
+        None => match fs::remove_file(&snapshot.path) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(AppError::io(&snapshot.path, error)),
+        },
+    }
+}
+
 fn load_or_create_file_unlocked() -> Result<ModelPricingFile, AppError> {
     if let Some(file) = read_file_unlocked()? {
         return Ok(file);
