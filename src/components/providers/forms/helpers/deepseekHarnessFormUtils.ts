@@ -12,9 +12,10 @@ export type DshModelApi = (typeof DSH_MODEL_API_OPTIONS)[number];
 
 /**
  * 每个等级对应的实际发送值：字符串照原样发给 pi-ai，`null` 表示不发送思考参数。
- * 例如 `{ off: null, low: "low", medium: "medium" }`。
+ * 例如 `{ off: null, low: "low", medium: "medium" }`；`false` 是原生
+ * 「显式禁用思考」哨兵，与字段缺省（继承目录能力）语义不同。
  */
-export type DshReasoningEfforts = Record<string, string | null>;
+export type DshReasoningEfforts = Record<string, string | null> | false;
 
 export type DshModel = {
   id: string;
@@ -296,6 +297,73 @@ export function dshReasoningInitialEntries(): DshReasoningEntries {
     level,
     dshReasoningDefaultValue(level),
   ]);
+}
+
+/** reasoningEfforts 的三种表单模式；与落盘形态一一对应。 */
+export type DshReasoningMode = "inherit" | "disabled" | "custom";
+
+/**
+ * undefined→inherit；false→disabled；其余任何值（含 null/数组/非法对象）→custom。
+ * 脏数据也进入 custom，保证界面能看到并由保存前校验显式拦下。
+ */
+export function dshReasoningMode(efforts: unknown): DshReasoningMode {
+  if (efforts === undefined) return "inherit";
+  if (efforts === false) return "disabled";
+  return "custom";
+}
+
+/**
+ * 切换模式后的新值：inherit→undefined、disabled→false、custom→已有普通对象
+ * 原样返回同一引用，否则播种原生初始表。普通对象即使非法也绝不在此修复。
+ */
+export function dshReasoningWithMode(
+  efforts: unknown,
+  mode: DshReasoningMode,
+): DshReasoningEfforts | false | undefined {
+  if (mode === "inherit") return undefined;
+  if (mode === "disabled") return false;
+  if (isPlainObject(efforts)) return efforts as DshReasoningEfforts;
+  return Object.fromEntries(
+    dshReasoningInitialEntries(),
+  ) as DshReasoningEfforts;
+}
+
+/**
+ * 点击档位芯片：已有该键则移除；否则按七档规范顺序插入，未知档位键视为
+ * 序号最大。总是返回新数组，其余条目的键、值与顺序保持不变。
+ */
+export function dshReasoningToggleLevel(
+  entries: DshReasoningEntries,
+  level: DshReasoningLevel,
+): DshReasoningEntries {
+  const copyEntry = ([entryLevel, value]: [string, unknown]): [
+    string,
+    unknown,
+  ] => [entryLevel, value];
+
+  if (entries.some(([entryLevel]) => entryLevel === level)) {
+    return entries
+      .filter(([entryLevel]) => entryLevel !== level)
+      .map(copyEntry);
+  }
+
+  const rankOf = (entryLevel: string): number => {
+    const index = (DSH_REASONING_LEVELS as readonly string[]).indexOf(
+      entryLevel,
+    );
+    return index === -1 ? Number.POSITIVE_INFINITY : index;
+  };
+  const targetRank = rankOf(level);
+  const found = entries.findIndex(
+    ([entryLevel]) => rankOf(entryLevel) > targetRank,
+  );
+  const insertAt = found === -1 ? entries.length : found;
+
+  return [
+    ...entries.slice(0, insertAt).map(copyEntry),
+    [level, dshReasoningDefaultValue(level)],
+    ...entries.slice(insertAt).map(copyEntry),
+  ];
 }
 
 /**

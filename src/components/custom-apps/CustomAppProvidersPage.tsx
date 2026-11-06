@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Boxes, Copy, Loader2, Pencil, Plus, Trash2 } from "lucide-react";
+import { Copy, Loader2, Pencil, Plus, Trash2 } from "lucide-react";
 import { AppPageHeader } from "@/components/shell/AppPageHeader";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -65,7 +65,15 @@ export function CustomAppProvidersPage({ app }: CustomAppProvidersPageProps) {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <AppPageHeader
-        icon={<Boxes className="h-[18px] w-[18px]" strokeWidth={2} />}
+        icon={
+          <ProviderIconBox
+            icon={app.icon}
+            name={app.name}
+            color={app.iconColor ?? undefined}
+            className="h-[18px] w-[18px] rounded-[4px]"
+            iconClassName="!h-[18px] !w-[18px]"
+          />
+        }
         title={app.name}
         subtitle={t("customApps.dialog.routingNote")}
         actions={
@@ -185,6 +193,7 @@ export function CustomAppProvidersPage({ app }: CustomAppProvidersPageProps) {
 
       <CustomProviderDialog
         isOpen={isCreateOpen || dialogProvider !== null}
+        appName={app.name}
         provider={dialogProvider}
         pending={pending}
         onCancel={() => {

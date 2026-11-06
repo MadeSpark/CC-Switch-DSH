@@ -1,15 +1,16 @@
 /**
- * DSH 表单的「思考强度（reasoningEfforts）」用例。
+ * DSH 表单的「思考强度（reasoningEfforts）」用例 —— 新交互（模式下拉 + 档位芯片
+ * + 折叠的 API 参数值行）。
  *
- * 行为契约见 `.tmp-local/dsh-native-reasoning/native-spec.md`：字段缺省 = 继承
- * 目录能力，`false` = 声明非推理模型，非空对象 = 精确声明可用档位。控件照抄
- * DSH 44.7 原生设置页（开关 + 档位行编辑器 + 添加档位），旧的插件「预设 /
- * 推荐 / 自适应 / 清除」按钮全部删除。
+ * 数据契约见 `.tmp-local/dsh-codex-style/spec.md`：字段缺省 = 继承目录能力，
+ * `false` = 声明非推理模型，非空对象 = 精确声明可用档位；切到自定义时已是
+ * 普通对象就原样保留（含非法对象，不在此修复）。
  *
  * 期望值都按原生规则手抄，不反过来用实现算期望：实现改错了这里必须红。
  * helper 的纯函数单测在 `deepseekHarnessFormUtils.reasoningEfforts.test.ts`。
  */
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import type { PropsWithChildren } from "react";
 import { useForm } from "react-hook-form";
@@ -33,6 +34,10 @@ vi.mock("@/lib/api/model-fetch", () => ({
   showFetchModelsError: vi.fn(),
 }));
 
+// jsdom 没有 scrollIntoView；Radix Select 打开时会滚动到选中项（repo 内其他
+// 用到 Radix Select 的测试同样补了这个桩，见 UsageDisplaySection.test.tsx）。
+Element.prototype.scrollIntoView ??= vi.fn();
+
 afterEach(cleanup);
 
 const FormShell = ({ children }: PropsWithChildren) => {
@@ -48,8 +53,12 @@ const NOT_SET = "Not set";
 const DISABLED = "Disabled";
 const NEEDS_LEVELS = "Needs levels";
 const NEEDS_LEVEL = "Keep at least one level other than off";
-const ADD_LEVEL = "Add level";
-const REMOVE_LEVEL = "Remove level";
+const MODE = "Mode";
+const INHERIT_HINT_KEY = "dshReasoning.inheritHint";
+const INHERIT = "Follow model catalog (default)";
+const NO_REASONING = "No reasoning";
+const CUSTOM = "Custom levels";
+const ADVANCED = "Advanced: API parameter values";
 
 interface HarnessProps {
   initialModels?: DshModel[];
@@ -111,7 +120,7 @@ function currentModel(index = 0): DshModel {
 }
 
 /** 落盘的等级表（断言键序时用它，`toEqual` 不保证顺序）。 */
-function savedEntries(index = 0): Array<[string, string | null]> {
+function savedEntries(index = 0): Array<[string, unknown]> {
   return Object.entries(currentModel(index).reasoningEfforts ?? {});
 }
 
@@ -128,63 +137,144 @@ function openEditor(rowIndex = 0): void {
   fireEvent.click(element);
 }
 
-function toggle(): HTMLElement {
-  return screen.getByRole("switch", { name: REASONING });
+// Radix Select 在 jsdom 下点击 trigger 会冒泡把外层 Popover 关掉（repo 既有
+// 测试同样用键盘开下拉）：ArrowDown 打开列表框，再点选项。
+async function chooseMode(label: string): Promise<void> {
+  fireEvent.keyDown(screen.getByRole("combobox", { name: MODE }), {
+    key: "ArrowDown",
+  });
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("option", { name: label }));
 }
 
-function enableReasoning(rowIndex = 0): void {
-  openEditor(rowIndex);
-  if (toggle().getAttribute("aria-checked") !== "true") {
-    fireEvent.click(toggle());
+/** 从未设置/关闭状态切到自定义档位（会播种 off/low/medium/high）。 */
+async function enableCustom(): Promise<void> {
+  openEditor();
+  await chooseMode(CUSTOM);
+}
+
+function chip(level: string): HTMLElement {
+  const found = screen.getByRole("button", { name: level });
+  return found;
+}
+
+function chipPressed(level: string): boolean {
+  return chip(level).getAttribute("aria-pressed") === "true";
+}
+
+function advancedToggle(): HTMLElement {
+  return screen.getByRole("button", { name: ADVANCED });
+}
+
+async function openAdvanced(): Promise<void> {
+  const button = advancedToggle();
+  if (button.getAttribute("aria-expanded") !== "true") {
+    const user = userEvent.setup();
+    await user.click(button);
   }
-}
-
-function levelSelect(index: number): HTMLSelectElement {
-  return screen.getByLabelText(`Level ${index + 1}`) as HTMLSelectElement;
-}
-
-function levelValues(): string[] {
-  return screen
-    .getAllByLabelText(/^Level \d+$/)
-    .map((element) => (element as HTMLSelectElement).value);
 }
 
 function valueInput(index: number): HTMLInputElement {
   return screen.getByLabelText(`Value ${index + 1}`) as HTMLInputElement;
 }
 
-function chooseLevel(index: number, level: string): void {
-  fireEvent.change(levelSelect(index), { target: { value: level } });
-}
-
 function typeValue(index: number, text: string): void {
   fireEvent.change(valueInput(index), { target: { value: text } });
 }
 
-function addLevel(): void {
-  fireEvent.click(screen.getByRole("button", { name: ADD_LEVEL }));
-}
-
-function removeLevel(index = 0): void {
-  fireEvent.click(screen.getAllByRole("button", { name: REMOVE_LEVEL })[index]);
-}
-
 const INITIAL_LEVELS = ["off", "low", "medium", "high"];
 
-describe("DSH 思考强度 · 原生开关", () => {
-  it("默认未设置；打开开关播种 off/low/medium/high 并落盘", () => {
+describe("DSH 思考强度 · 脏值摘要与面板正文", () => {
+  it.each([
+    ["null", null],
+    ["空数组", []],
+    ["字符串", "x"],
+    ["数字", 1],
+  ] as const)(
+    "非普通对象脏值（%s）显示 needsLevelShort 且面板正文 role=alert",
+    async (_name, efforts) => {
+      renderHarness({
+        initialModels: [
+          {
+            id: "gw",
+            reasoningEfforts: efforts as unknown,
+            rowKey: "r1",
+          } as unknown as DshModel,
+        ],
+      });
+
+      // 触发按钮：needsLevelShort 文案 + 现有 issue 红色。
+      expect(trigger()).toHaveTextContent(NEEDS_LEVELS);
+      expect(trigger()).toHaveClass("text-danger-text");
+
+      openEditor();
+      expect(screen.getByRole("alert")).toHaveTextContent(NEEDS_LEVEL);
+      expect(screen.queryByText(INHERIT_HINT_KEY)).toBeNull();
+
+      // 脏值时模式下拉已显示为自定义：Radix 对重新点选当前选中项不回调
+      // onValueChange（受控 setValue 里 value === prop 直接跳过），所以真实
+      // 路径是先切走（继承会清掉脏字段）再切回自定义播种默认四档。
+      await chooseMode(INHERIT);
+      expect(currentModel()).not.toHaveProperty("reasoningEfforts");
+
+      await chooseMode(CUSTOM);
+      expect(savedEntries()).toEqual([
+        ["off", null],
+        ["low", "low"],
+        ["medium", "medium"],
+        ["high", "high"],
+      ]);
+    },
+  );
+
+  it("undefined 仍显示 notSet 摘要与 inheritHint 正文", async () => {
+    renderHarness();
+
+    expect(trigger()).toHaveTextContent(NOT_SET);
+    expect(trigger()).not.toHaveClass("text-danger-text");
+
+    openEditor();
+    expect(screen.queryByRole("alert")).toBeNull();
+    // 测试环境 i18n 资源为空：不带 defaultValue 的 t() 原样返回 key，
+    // inheritHint 正文正好用它断言（避免绑死任何语言的具体文案）。
+    expect(screen.getByText(INHERIT_HINT_KEY)).toBeInTheDocument();
+  });
+
+  it("false 仍显示 disabled 摘要与 disabled 正文", async () => {
+    renderHarness({
+      initialModels: [{ id: "o3", reasoningEfforts: false, rowKey: "r1" }],
+    });
+
+    expect(trigger()).toHaveTextContent(DISABLED);
+    expect(trigger()).not.toHaveClass("text-danger-text");
+
+    openEditor();
+    expect(screen.queryByRole("alert")).toBeNull();
+    // 触发按钮与面板正文都是「已禁用」，正文那条有专属 class，用它定位。
+    const bodyHints = screen.getAllByText(DISABLED);
+    expect(bodyHints).toHaveLength(2);
+    expect(bodyHints[1]).toHaveClass("text-fg-3");
+  });
+});
+
+describe("DSH 思考强度 · 模式下拉", () => {
+  it("默认未设置；切到自定义播种 off/low/medium/high 并落盘", async () => {
     renderHarness();
 
     expect(trigger()).toHaveTextContent(NOT_SET);
     expect(currentModel()).not.toHaveProperty("reasoningEfforts");
 
-    openEditor();
-    expect(toggle()).toHaveAttribute("aria-checked", "false");
-    fireEvent.click(toggle());
-    expect(toggle()).toHaveAttribute("aria-checked", "true");
+    await enableCustom();
 
-    expect(levelValues()).toEqual(INITIAL_LEVELS);
-    // off 不发参数，输入框禁用且留空；其余默认等于档位名。
+    for (const level of INITIAL_LEVELS) {
+      expect(chipPressed(level)).toBe(true);
+    }
+    expect(chipPressed("minimal")).toBe(false);
+    expect(chipPressed("xhigh")).toBe(false);
+    expect(chipPressed("max")).toBe(false);
+
+    // off 不发参数，输入框（折叠区里）禁用且留空；其余默认等于档位名。
+    await openAdvanced();
     expect(valueInput(0)).toBeDisabled();
     expect(valueInput(0)).toHaveValue("");
     expect(valueInput(1)).toHaveValue("low");
@@ -202,30 +292,42 @@ describe("DSH 思考强度 · 原生开关", () => {
     );
   });
 
-  it("关闭开关删掉字段；`false` 行显示已禁用，打开后变普通对象", () => {
+  it("模式下拉的 listbox 带 z-[1100]，盖过外层 z-[1000] 的 Popover", async () => {
     renderHarness();
-    enableReasoning();
+
+    await enableCustom();
+
+    // 重新打开模式下拉，检查 listbox 容器的层级类（jsdom 不算样式，只断言类名）。
+    fireEvent.keyDown(screen.getByRole("combobox", { name: MODE }), {
+      key: "ArrowDown",
+    });
+    const listbox = screen.getByRole("listbox");
+    expect(listbox.className).toContain("z-[1100]");
+  });
+
+  it("切到「不支持思考」写 false；再切回「跟随」删除字段", async () => {
+    renderHarness();
+
+    await enableCustom();
     expect(currentModel()).toHaveProperty("reasoningEfforts");
 
-    fireEvent.click(toggle());
+    await chooseMode(NO_REASONING);
+    expect(currentModel().reasoningEfforts).toBe(false);
+    expect(trigger()).toHaveTextContent(DISABLED);
+
+    await chooseMode(INHERIT);
     expect(currentModel()).not.toHaveProperty("reasoningEfforts");
     expect(JSON.stringify(currentModel())).not.toContain("reasoningEfforts");
+    expect(trigger()).toHaveTextContent(NOT_SET);
+  });
 
-    cleanup();
-
+  it("存量 false 切到自定义播种默认四档", async () => {
     renderHarness({
       initialModels: [{ id: "o3", reasoningEfforts: false, rowKey: "r1" }],
     });
     expect(trigger()).toHaveTextContent(DISABLED);
-    expect(currentModel().reasoningEfforts).toBe(false);
 
-    openEditor();
-    expect(toggle()).toHaveAttribute("aria-checked", "false");
-    // 显式 false 只读展示：关着就是关着，不落盘任何对象。
-    expect(screen.getAllByText(DISABLED).length).toBeGreaterThan(0);
-    expect(currentModel().reasoningEfforts).toBe(false);
-
-    fireEvent.click(toggle());
+    await enableCustom();
     expect(savedEntries()).toEqual([
       ["off", null],
       ["low", "low"],
@@ -233,211 +335,138 @@ describe("DSH 思考强度 · 原生开关", () => {
       ["high", "high"],
     ]);
   });
-});
 
-describe("DSH 思考强度 · 档位增删", () => {
-  it("添加档位按原生「最高已用之上」规则给出 xhigh", () => {
-    renderHarness();
-    enableReasoning();
+  it("已是对象（含非法）时切到自定义原样保留，未知档位以选中芯片展示", async () => {
+    renderHarness({
+      initialModels: [
+        { id: "gw", reasoningEfforts: { turbo: "turbo" }, rowKey: "r1" },
+      ],
+    });
 
-    addLevel();
-    expect(levelValues()).toEqual([...INITIAL_LEVELS, "xhigh"]);
-    expect(valueInput(4)).toHaveValue("xhigh");
-    expect(savedEntries()[4]).toEqual(["xhigh", "xhigh"]);
+    await enableCustom();
 
-    // 最高档已是 xhigh，再加就是 max（不是回头补 minimal）。
-    addLevel();
-    expect(levelValues()).toEqual([...INITIAL_LEVELS, "xhigh", "max"]);
-    expect(savedEntries()[5]).toEqual(["max", "max"]);
-  });
-
-  it("删除所有行得到 {} 并显示 needsLevel（保存拦截交给 ProviderForm）", () => {
-    renderHarness();
-    enableReasoning();
-
-    for (let index = 0; index < INITIAL_LEVELS.length; index += 1) {
-      removeLevel();
-    }
-
-    expect(screen.queryAllByLabelText(/^Level \d+$/)).toEqual([]);
-    expect(JSON.stringify(currentModel().reasoningEfforts)).toBe("{}");
-    expect(screen.getByRole("alert")).toHaveTextContent(NEEDS_LEVEL);
+    expect(savedEntries()).toEqual([["turbo", "turbo"]]);
+    expect(chipPressed("turbo")).toBe(true);
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "turbo is not a native level",
+    );
     expect(trigger()).toHaveTextContent(NEEDS_LEVELS);
   });
 });
 
-describe("DSH 思考强度 · 换档与自定义参数值", () => {
-  it("自定义参数值在合法换档时保留", () => {
+describe("DSH 思考强度 · 档位芯片", () => {
+  it("点选芯片按规范序插入默认值，再点一次移除", async () => {
     renderHarness({
       initialModels: [
-        {
-          id: "gw",
-          reasoningEfforts: { low: "custom-low", medium: "medium" },
-          rowKey: "r1",
-        },
+        { id: "gw", reasoningEfforts: { low: "low" }, rowKey: "r1" },
       ],
     });
-    openEditor();
+    await enableCustom();
+    await openAdvanced();
 
-    chooseLevel(0, "high");
-    expect(levelValues()).toEqual(["high", "medium"]);
-    expect(valueInput(0)).toHaveValue("custom-low");
-    expect(savedEntries()).toEqual([
-      ["high", "custom-low"],
-      ["medium", "medium"],
-    ]);
-  });
-
-  it("off → low 用档位默认值，low → off 用 null", () => {
-    renderHarness({
-      initialModels: [
-        {
-          id: "gw",
-          reasoningEfforts: { off: null, medium: "medium" },
-          rowKey: "r1",
-        },
-      ],
-    });
-    openEditor();
-
-    chooseLevel(0, "low");
+    const user = userEvent.setup();
+    // high 的规范序号比 low 大，插不到前面 → 追加到末尾。
+    await user.click(chip("high"));
     expect(savedEntries()).toEqual([
       ["low", "low"],
-      ["medium", "medium"],
+      ["high", "high"],
     ]);
-    expect(valueInput(0)).toHaveValue("low");
 
-    chooseLevel(0, "off");
+    // off 插到首个规范序号更大的档位（low）之前。
+    await user.click(chip("off"));
     expect(savedEntries()).toEqual([
       ["off", null],
-      ["medium", "medium"],
+      ["low", "low"],
+      ["high", "high"],
     ]);
     expect(valueInput(0)).toBeDisabled();
-    expect(valueInput(0)).toHaveValue("");
+
+    // 再点一次 = 移除，其余条目原样保留。
+    await user.click(chip("low"));
+    expect(savedEntries()).toEqual([
+      ["off", null],
+      ["high", "high"],
+    ]);
   });
 
-  it("未知档位可以下拉修回七档之一", () => {
+  it("取消所有芯片得到 {} 并显示 needsLevel（保存拦截交给 ProviderForm）", async () => {
+    renderHarness();
+    await enableCustom();
+
+    const user = userEvent.setup();
+    for (const level of INITIAL_LEVELS) {
+      await user.click(chip(level));
+    }
+
+    expect(JSON.stringify(currentModel().reasoningEfforts)).toBe("{}");
+    expect(screen.getByRole("alert")).toHaveTextContent(NEEDS_LEVEL);
+    expect(trigger()).toHaveTextContent(NEEDS_LEVELS);
+  });
+
+  it("点击未知档位芯片即移除该键", async () => {
     renderHarness({
       initialModels: [
-        {
-          id: "gw",
-          reasoningEfforts: { turbo: "turbo" },
-          rowKey: "r1",
-        },
+        { id: "gw", reasoningEfforts: { turbo: "turbo" }, rowKey: "r1" },
       ],
     });
-    openEditor();
+    await enableCustom();
 
-    expect(levelValues()).toEqual(["turbo"]);
-    expect(screen.getByRole("alert")).toHaveTextContent(
-      "turbo is not a native level",
-    );
-    // 未知档位排在第一位，但可以选择任一原生档位修复。
-    const options = Array.from(levelSelect(0).options).map(
-      (option) => option.value,
-    );
-    expect(options).toEqual([
-      "turbo",
-      "off",
-      "minimal",
-      "low",
-      "medium",
-      "high",
-      "xhigh",
-      "max",
-    ]);
-
-    chooseLevel(0, "low");
-    expect(savedEntries()).toEqual([["low", "low"]]);
-    expect(screen.queryByRole("alert")).toBeNull();
+    const user = userEvent.setup();
+    await user.click(chip("turbo"));
+    expect(JSON.stringify(currentModel().reasoningEfforts)).toBe("{}");
+    expect(screen.getByRole("alert")).toHaveTextContent(NEEDS_LEVEL);
   });
 });
 
-describe("DSH 思考强度 · 参数值编辑", () => {
-  it("清空 / 只有空白时回到档位默认值，失焦后显示默认值", () => {
-    renderHarness({
-      initialModels: [
-        {
-          id: "gw",
-          reasoningEfforts: { off: null, low: "low" },
-          rowKey: "r1",
-        },
-      ],
-    });
-    openEditor();
+describe("DSH 思考强度 · 高级：API 参数值", () => {
+  it("折叠区默认收起；展开后 off 输入框禁用", async () => {
+    renderHarness();
+    await enableCustom();
 
-    typeValue(1, "");
-    expect(valueInput(1)).toHaveValue("");
-    expect(savedEntries()).toEqual([
-      ["off", null],
-      ["low", "low"],
-    ]);
+    expect(advancedToggle()).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByLabelText("Value 1")).toBeNull();
 
-    fireEvent.blur(valueInput(1));
-    expect(valueInput(1)).toHaveValue("low");
-
-    typeValue(1, "   ");
-    expect(savedEntries()).toEqual([
-      ["off", null],
-      ["low", "low"],
-    ]);
-    fireEvent.blur(valueInput(1));
+    await openAdvanced();
+    expect(advancedToggle()).toHaveAttribute("aria-expanded", "true");
+    expect(valueInput(0)).toBeDisabled();
+    expect(valueInput(0)).toHaveValue("");
+    expect(valueInput(1)).not.toBeDisabled();
     expect(valueInput(1)).toHaveValue("low");
   });
 
-  it("自定义字符串 trim 后落盘（原生 client.js:358-364 同一个规则）", () => {
-    renderHarness({
-      initialModels: [
-        {
-          id: "gw",
-          reasoningEfforts: { off: null, low: "low" },
-          rowKey: "r1",
-        },
-      ],
-    });
-    openEditor();
+  it("编辑参数值即时写回并 trim", async () => {
+    renderHarness();
+    await enableCustom();
+    await openAdvanced();
 
     typeValue(1, "  high-x  ");
     expect(savedEntries()).toEqual([
       ["off", null],
       ["low", "high-x"],
+      ["medium", "medium"],
+      ["high", "high"],
     ]);
   });
 
-  it('off 的自定义字符串保留并显示；null 不会显示成 "null"', () => {
-    renderHarness({
-      initialModels: [
-        {
-          id: "gw",
-          reasoningEfforts: { off: "none", low: "low" },
-          rowKey: "r1",
-        },
-      ],
-    });
-    openEditor();
+  it("清空 / 只有空白时失焦回落到档位默认值", async () => {
+    renderHarness();
+    await enableCustom();
+    await openAdvanced();
 
-    expect(valueInput(0)).toBeDisabled();
-    expect(valueInput(0)).toHaveValue("none");
-    fireEvent.blur(valueInput(0));
-    expect(valueInput(0)).toHaveValue("none");
+    typeValue(1, "");
+    expect(valueInput(1)).toHaveValue("");
+    expect(savedEntries()[1]).toEqual(["low", "low"]);
 
-    cleanup();
+    fireEvent.blur(valueInput(1));
+    expect(valueInput(1)).toHaveValue("low");
 
-    renderHarness({
-      initialModels: [
-        {
-          id: "gw",
-          reasoningEfforts: { off: null, low: "low" },
-          rowKey: "r1",
-        },
-      ],
-    });
-    openEditor();
-    expect(valueInput(0)).toHaveValue("");
-    expect((valueInput(0) as HTMLInputElement).value).not.toBe("null");
+    typeValue(1, "   ");
+    fireEvent.blur(valueInput(1));
+    expect(valueInput(1)).toHaveValue("low");
+    expect(savedEntries()[1]).toEqual(["low", "low"]);
   });
 
-  it("存量脏对象不会撞渲染，显示 JSON，失焦回落到默认值", () => {
+  it("存量脏对象不会撞渲染，显示 JSON，失焦回落到默认值", async () => {
     const hostileModel = {
       id: "gw",
       reasoningEfforts: { off: null, low: { toString: 3 } },
@@ -445,8 +474,8 @@ describe("DSH 思考强度 · 参数值编辑", () => {
     } as unknown as DshModel;
     renderHarness({ initialModels: [hostileModel] });
 
-    // 旧实现直接 String(wire) 会抛 TypeError: Cannot convert object…
-    openEditor();
+    await enableCustom();
+    await openAdvanced();
     expect(valueInput(1)).toHaveValue('{"toString":3}');
     expect(valueInput(1)).not.toBeDisabled();
 
@@ -457,24 +486,8 @@ describe("DSH 思考强度 · 参数值编辑", () => {
       ["low", "low"],
     ]);
   });
-});
 
-describe("DSH 思考强度 · 非法状态提示", () => {
-  it("只剩 off 时显示 needsLevel 且触发器标红", () => {
-    renderHarness({
-      initialModels: [
-        { id: "gw", reasoningEfforts: { off: null }, rowKey: "r1" },
-      ],
-    });
-
-    expect(trigger()).toHaveTextContent(NEEDS_LEVELS);
-    expect(trigger()).toHaveClass("text-danger-text");
-
-    openEditor();
-    expect(screen.getByRole("alert")).toHaveTextContent(NEEDS_LEVEL);
-  });
-
-  it("非 off 档位空值显示 valueRequired，并只标红那一行", () => {
+  it("非 off 档位空值显示 valueRequired，并只标红那一行", async () => {
     renderHarness({
       initialModels: [
         {
@@ -486,76 +499,44 @@ describe("DSH 思考强度 · 非法状态提示", () => {
     });
 
     expect(trigger()).toHaveClass("text-danger-text");
-    openEditor();
+    await enableCustom();
+    await openAdvanced();
 
     expect(screen.getByRole("alert")).toHaveTextContent("low needs a value");
-    expect(levelSelect(0)).toHaveAttribute("aria-invalid", "true");
     expect(valueInput(0)).toHaveAttribute("aria-invalid", "true");
-    expect(levelSelect(1)).not.toHaveAttribute("aria-invalid");
     expect(valueInput(1)).not.toHaveAttribute("aria-invalid");
-  });
-
-  it("存量非法值失焦时回落到档位默认值（原生 leaveValue）", () => {
-    renderHarness({
-      initialModels: [
-        {
-          id: "gw",
-          reasoningEfforts: { low: "", medium: 3 },
-          rowKey: "r1",
-        },
-      ],
-    });
-    openEditor();
-
-    expect(valueInput(0)).toHaveValue("");
-    fireEvent.blur(valueInput(0));
-    expect(savedEntries()).toEqual([
-      ["low", "low"],
-      ["medium", 3],
-    ]);
-
-    expect(valueInput(1)).toHaveValue("3");
-    fireEvent.blur(valueInput(1));
-    expect(savedEntries()).toEqual([
-      ["low", "low"],
-      ["medium", "medium"],
-    ]);
-    expect(screen.queryByRole("alert")).toBeNull();
-  });
-
-  it("合法等级表不报错、不标红", () => {
-    renderHarness({
-      initialModels: [
-        {
-          id: "gw",
-          reasoningEfforts: { off: null, low: "low", max: "max" },
-          rowKey: "r1",
-        },
-      ],
-    });
-
-    expect(trigger()).not.toHaveClass("text-danger-text");
-    expect(trigger()).toHaveTextContent("off, low, max");
-    openEditor();
-    expect(screen.queryByRole("alert")).toBeNull();
   });
 });
 
-describe("DSH 思考强度 · 与原生设置页一致", () => {
-  it("不再有插件的预设 / 推荐 / 自适应 / 清除按钮和复选框", () => {
-    renderHarness();
-    enableReasoning();
+describe("DSH 思考强度 · 字节级保留", () => {
+  it("只开面板 / 折叠区不改存量字段；其余模型字段一字不动", async () => {
+    renderHarness({
+      initialModels: [
+        {
+          id: "gw",
+          name: "Sol",
+          baseUrl: "https://api.example.com/v1",
+          reasoningEfforts: { low: "custom-low", turbo: "turbo" },
+          rowKey: "r1",
+        },
+      ],
+    });
+    const before = JSON.stringify(currentModel());
 
-    expect(screen.queryByRole("button", { name: /preset/i })).toBeNull();
-    expect(
-      screen.queryByRole("button", { name: "Clear reasoning levels" }),
-    ).toBeNull();
-    expect(screen.queryByText("Adaptive thinking on")).toBeNull();
-    expect(screen.queryByText("Reasoning disabled (false)")).toBeNull();
-    expect(screen.queryByRole("checkbox")).toBeNull();
+    await enableCustom();
+    await openAdvanced();
+    // 再收起折叠区。
+    const user = userEvent.setup();
+    await user.click(advancedToggle());
+
+    expect(JSON.stringify(currentModel())).toBe(before);
+    expect(savedEntries()).toEqual([
+      ["low", "custom-low"],
+      ["turbo", "turbo"],
+    ]);
   });
 
-  it("未知键与顺序原样保留，编辑别的行也不会丢", () => {
+  it("已是对象时切到自定义不重排、不修复，键序原样", async () => {
     renderHarness({
       initialModels: [
         {
@@ -565,28 +546,18 @@ describe("DSH 思考强度 · 与原生设置页一致", () => {
         },
       ],
     });
-    openEditor();
+    const before = JSON.stringify(currentModel());
 
-    expect(levelValues()).toEqual(["turbo", "off", "low"]);
+    await enableCustom();
 
-    typeValue(2, "ultra");
-    expect(savedEntries()).toEqual([
-      ["turbo", "turbo"],
-      ["off", null],
-      ["low", "ultra"],
-    ]);
-
-    chooseLevel(2, "medium");
-    expect(savedEntries()).toEqual([
-      ["turbo", "turbo"],
-      ["off", null],
-      ["medium", "ultra"],
-    ]);
+    expect(JSON.stringify(currentModel())).toBe(before);
+    expect(chipPressed("turbo")).toBe(true);
+    expect(chipPressed("low")).toBe(true);
   });
 });
 
 describe("DSH 思考强度 · 官方路由不渲染该列", () => {
-  it("自定义 pi-ai 路由有档位编辑入口和列头", () => {
+  it("自定义 pi-ai 路由有编辑入口和列头", () => {
     renderHarness();
 
     expect(screen.getAllByRole("button", { name: REASONING })).toHaveLength(1);

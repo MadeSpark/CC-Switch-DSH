@@ -116,7 +116,9 @@ describe("CustomAppProvidersPage 供应商列表", () => {
   it("渲染应用头部与供应商卡片", async () => {
     renderPage();
     expect(
-      await screen.findByText("自定义应用固定走聚合路由：模型来自启用的供应商，不支持直连单个供应商。"),
+      await screen.findByText(
+        "自定义应用固定走聚合路由：模型来自启用的供应商，不支持直连单个供应商。",
+      ),
     ).toBeInTheDocument();
     expect(await screen.findByText("供应商A")).toBeInTheDocument();
     expect(screen.getByText(/provider-a/)).toBeInTheDocument();
@@ -134,9 +136,7 @@ describe("CustomAppProvidersPage 供应商列表", () => {
     vi.mocked(customAppsApi.listCustomAppProviders).mockResolvedValue({});
     renderPage();
     expect(
-      await screen.findByText(
-        "没有可聚合的模型：先在供应商页启用并配置模型。",
-      ),
+      await screen.findByText("没有可聚合的模型：先在供应商页启用并配置模型。"),
     ).toBeInTheDocument();
   });
 
@@ -161,10 +161,33 @@ describe("CustomAppProvidersPage 新建供应商", () => {
     await userEvent.click(
       await screen.findByRole("button", { name: "添加供应商" }),
     );
+    expect(
+      await screen.findByRole("heading", { name: "添加供应商" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "返回供应商列表" }),
+    ).toBeInTheDocument();
     const nameInput = await screen.findByLabelText("显示名称");
     await userEvent.type(nameInput, "My Provider");
     const idInput = screen.getByLabelText("供应商标识");
     await waitFor(() => expect(idInput).toHaveValue("my-provider"));
+  });
+
+  it("取消关闭全屏编辑页并返回供应商列表", async () => {
+    renderPage();
+    await userEvent.click(
+      await screen.findByRole("button", { name: "添加供应商" }),
+    );
+    expect(
+      await screen.findByRole("heading", { name: "添加供应商" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "取消" }));
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("heading", { name: "添加供应商" }),
+      ).not.toBeInTheDocument();
+    });
   });
 
   it("手动编辑标识后不再自动派生", async () => {
@@ -179,57 +202,42 @@ describe("CustomAppProvidersPage 新建供应商", () => {
     await waitFor(() => expect(idInput).toHaveValue("fixed-id"));
   });
 
-  it("大写标识阻止提交", async () => {
+  it("大写且带空格的标识在失焦时规范为小写", async () => {
     renderPage();
     await userEvent.click(
       await screen.findByRole("button", { name: "添加供应商" }),
     );
-    await userEvent.type(
-      screen.getByLabelText("供应商标识"),
-      "Uppercase-Id",
-    );
-    await userEvent.type(
-      screen.getByLabelText("显示名称"),
-      "供应商X",
-    );
-    await userEvent.type(
-      screen.getByLabelText("Base URL"),
-      "https://api.example.com",
-    );
-    const confirm = screen.getByRole("button", { name: "保存" });
-    expect(confirm).toBeDisabled();
+    const idInput = screen.getByLabelText("供应商标识");
+    await userEvent.type(idInput, " WorkBuddy ");
+    await userEvent.tab();
+    await waitFor(() => expect(idInput).toHaveValue("workbuddy"));
   });
 
-  it("完整表单提交调用 saveCustomAppProvider", async () => {
+  it("大写标识在完整表单中可提交并规范为小写", async () => {
     vi.mocked(customAppsApi.saveCustomAppProvider).mockResolvedValue(true);
     renderPage();
     await userEvent.click(
       await screen.findByRole("button", { name: "添加供应商" }),
     );
-    await userEvent.type(
-      screen.getByLabelText("显示名称"),
-      "供应商X",
-    );
+    const idInput = screen.getByLabelText("供应商标识");
+    await userEvent.type(idInput, "WorkBuddy");
+    await userEvent.tab();
+    await userEvent.type(screen.getByLabelText("显示名称"), "供应商X");
     await userEvent.type(
       screen.getByLabelText("Base URL"),
       "https://api.example.com",
     );
-    await userEvent.type(
-      screen.getByLabelText("API Key"),
-      "sk-new",
-    );
-    const dialog = screen.getByRole("dialog");
-    await userEvent.click(within(dialog).getByRole("button", { name: "添加" }));
-    await userEvent.type(
-      screen.getByPlaceholderText("模型 ID"),
-      "gpt-4o",
-    );
-    await userEvent.click(screen.getByRole("button", { name: "保存" }));
+    await userEvent.type(screen.getByLabelText("API Key"), "sk-new");
+    await userEvent.click(screen.getByRole("button", { name: "添加" }));
+    await userEvent.type(screen.getByPlaceholderText("模型 ID"), "gpt-4o");
+    const save = screen.getByRole("button", { name: "保存" });
+    expect(save).toBeEnabled();
+    await userEvent.click(save);
     await waitFor(() => {
       expect(customAppsApi.saveCustomAppProvider).toHaveBeenCalledWith(
         "app-1",
         expect.objectContaining({
-          id: expect.stringMatching(/^[a-z0-9][a-z0-9-]*$/),
+          id: "workbuddy",
           name: "供应商X",
         }),
       );
@@ -238,6 +246,28 @@ describe("CustomAppProvidersPage 新建供应商", () => {
       expect(toast.success).toHaveBeenCalled();
     });
   });
+
+  it("标识含非法字符或为空时保存按钮保持禁用", async () => {
+    renderPage();
+    await userEvent.click(
+      await screen.findByRole("button", { name: "添加供应商" }),
+    );
+    const idInput = screen.getByLabelText("供应商标识");
+    await userEvent.type(idInput, "a b!");
+    await userEvent.type(screen.getByLabelText("显示名称"), "供应商X");
+    await userEvent.type(
+      screen.getByLabelText("Base URL"),
+      "https://api.example.com",
+    );
+    await userEvent.type(screen.getByLabelText("API Key"), "sk-new");
+    await userEvent.click(screen.getByRole("button", { name: "添加" }));
+    await userEvent.type(screen.getByPlaceholderText("模型 ID"), "gpt-4o");
+    const save = screen.getByRole("button", { name: "保存" });
+    expect(save).toBeDisabled();
+
+    await userEvent.clear(idInput);
+    expect(save).toBeDisabled();
+  });
 });
 
 describe("CustomAppProvidersPage 编辑与删除", () => {
@@ -245,6 +275,12 @@ describe("CustomAppProvidersPage 编辑与删除", () => {
     vi.mocked(customAppsApi.saveCustomAppProvider).mockResolvedValue(true);
     renderPage();
     await userEvent.click(await screen.findByRole("button", { name: "编辑" }));
+    expect(
+      await screen.findByRole("heading", { name: "编辑 供应商A" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "返回供应商列表" }),
+    ).toBeInTheDocument();
     const idInput = await screen.findByLabelText("供应商标识");
     expect(idInput).toHaveValue("provider-a");
     expect(idInput).toBeDisabled();
@@ -260,6 +296,62 @@ describe("CustomAppProvidersPage 编辑与删除", () => {
     });
   });
 
+  it("编辑：非法推理档位阻止保存并提示错误", async () => {
+    const invalidProvider = provider();
+    invalidProvider.settingsConfig.models = [
+      { id: "gpt-4o", name: "GPT-4o", reasoningEfforts: {} },
+    ];
+    vi.mocked(customAppsApi.listCustomAppProviders).mockResolvedValue({
+      "provider-a": invalidProvider,
+    });
+    renderPage();
+    await userEvent.click(await screen.findByRole("button", { name: "编辑" }));
+    const save = await screen.findByRole("button", { name: "保存" });
+    await waitFor(() => expect(save).toBeEnabled());
+    await userEvent.click(save);
+    expect(customAppsApi.saveCustomAppProvider).not.toHaveBeenCalled();
+    expect(toast.error).toHaveBeenCalledWith(
+      expect.stringContaining("模型「gpt-4o」的推理等级无效"),
+    );
+  });
+
+  it("编辑：合法推理档位可保存并原样透传", async () => {
+    vi.mocked(customAppsApi.saveCustomAppProvider).mockResolvedValue(true);
+    const validProvider = provider();
+    validProvider.settingsConfig.models = [
+      {
+        id: "gpt-4o",
+        name: "GPT-4o",
+        reasoningEfforts: { off: null, low: "low" },
+      },
+    ];
+    vi.mocked(customAppsApi.listCustomAppProviders).mockResolvedValue({
+      "provider-a": validProvider,
+    });
+    renderPage();
+    await userEvent.click(await screen.findByRole("button", { name: "编辑" }));
+    const save = await screen.findByRole("button", { name: "保存" });
+    await waitFor(() => expect(save).toBeEnabled());
+    await userEvent.click(save);
+    await waitFor(() => {
+      expect(customAppsApi.saveCustomAppProvider).toHaveBeenCalledWith(
+        "app-1",
+        expect.objectContaining({
+          id: "provider-a",
+          settingsConfig: expect.objectContaining({
+            models: [
+              expect.objectContaining({
+                id: "gpt-4o",
+                reasoningEfforts: { off: null, low: "low" },
+              }),
+            ],
+          }),
+        }),
+      );
+    });
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+
   it("删除：确认后调用 deleteCustomAppProvider", async () => {
     vi.mocked(customAppsApi.deleteCustomAppProvider).mockResolvedValue(true);
     renderPage();
@@ -267,9 +359,7 @@ describe("CustomAppProvidersPage 编辑与删除", () => {
     await userEvent.click(screen.getByRole("button", { name: "删除" }));
     expect(await screen.findByText("删除「供应商A」")).toBeInTheDocument();
     const dialog = screen.getByRole("dialog");
-    await userEvent.click(
-      within(dialog).getByRole("button", { name: "删除" }),
-    );
+    await userEvent.click(within(dialog).getByRole("button", { name: "删除" }));
     await waitFor(() => {
       expect(customAppsApi.deleteCustomAppProvider).toHaveBeenCalledWith(
         "app-1",

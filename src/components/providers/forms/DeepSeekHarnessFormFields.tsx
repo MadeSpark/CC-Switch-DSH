@@ -6,7 +6,6 @@ import { FormLabel } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { ImeSafeInput } from "@/components/ui/ime-safe-input";
 import { Button } from "@/components/ui/button";
-import { Switch } from "@/components/ui/switch";
 import { DshModelPresetMatchDialog } from "@/components/model-presets/DshModelPresetMatchDialog";
 import {
   Popover,
@@ -29,12 +28,12 @@ import {
 } from "@/lib/api/model-fetch";
 import {
   DSH_MODEL_API_OPTIONS,
+  DSH_REASONING_LEVELS,
   dshReasoningDefaultValue,
-  dshReasoningInitialEntries,
   dshReasoningIssue,
-  dshReasoningLevelChoices,
-  dshReasoningNextLevel,
-  dshReasoningWithLevel,
+  dshReasoningMode,
+  dshReasoningToggleLevel,
+  dshReasoningWithMode,
   dshReasoningWithWire,
   formatDshReasoningLevelsLabel,
   formatDshReasoningWire,
@@ -44,6 +43,8 @@ import {
   type DshModel,
   type DshReasoningEfforts,
   type DshReasoningEntries,
+  type DshReasoningLevel,
+  type DshReasoningMode,
 } from "./helpers/deepseekHarnessFormUtils";
 import {
   FetchedModelPicker,
@@ -78,12 +79,12 @@ interface DshReasoningLevelsEditorProps {
 }
 
 /**
- * 模型级「思考强度」控件，照抄 DSH 44.7 原生设置页：
- * Popover 里一个开关（继承 ⇄ 声明）+ 行编辑器（档位下拉 + API 参数值 + 删除）
- * + 添加档位。开关关掉 = 删除字段（继承目录能力）；打开则播种
- * `off/low/medium/high`（`off` 发 `null`，其余发档位名）。
- * 编辑期允许出现 `{}`、未知档位、空值等中间态，保存前由 `dshReasoningIssue`
- * 硬拦截，这里只负责把它们标出来。
+ * 模型级「思考强度」控件：Popover 里一个模式下拉（跟随目录 / 不支持思考 /
+ * 自定义档位）+ 档位芯片（点选即增删，顺序由 `dshReasoningToggleLevel` 保证）
+ * + 默认收起的「高级：API 参数值」行编辑器。「跟随」= 删除字段；「不支持思考」
+ * = 写 `false`（原生显式禁用）；自定义则播种 `off/low/medium/high`（`off`
+ * 发 `null`，其余发档位名）。切到自定义时已是普通对象就原样保留（含非法对象，
+ * 不在此修复）；编辑期中间态由 `dshReasoningIssue` 在保存前硬拦截。
  */
 function DshReasoningLevelsEditor({
   efforts,
@@ -94,24 +95,28 @@ function DshReasoningLevelsEditor({
   const [open, setOpen] = useState(false);
   // 正在输入的那一行：输入框允许暂时是空串，行数据已经回到档位默认值。
   const [typing, setTyping] = useState<{ index: number; text: string }>();
+  // 「高级：API 参数值」折叠区，默认收起。
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   const entries = readDshReasoningEntries(efforts);
+  const mode = dshReasoningMode(efforts);
   const issue = dshReasoningIssue(efforts);
-  const usedLevels = entries?.map(([level]) => level) ?? [];
-  const nextLevel = dshReasoningNextLevel(usedLevels);
   const issueIndex =
     entries && issue && "level" in issue
       ? entries.findIndex(([level]) => level === issue.level)
       : -1;
 
-  // 摘要：显式 false → 已关闭；没有字段 → 未设置；非法表 → 缺档位提示。
-  const summary = !entries
-    ? efforts === false
-      ? t("dshReasoning.disabled", { defaultValue: "Disabled" })
-      : t("dshReasoning.notSet", { defaultValue: "Not set" })
-    : issue
-      ? t("dshReasoning.needsLevelShort", { defaultValue: "Needs levels" })
-      : formatDshReasoningLevelsLabel(usedLevels);
+  // 摘要：没有字段 → 未设置；显式 false → 已关闭；非普通对象的其余脏值
+  // （null/数组/标量，原生判非法而非继承）→ 缺档位提示并标红；普通对象沿用
+  // issue/档位列表逻辑。
+  const summary =
+    efforts === undefined
+      ? t("dshReasoning.notSet", { defaultValue: "Not set" })
+      : efforts === false
+        ? t("dshReasoning.disabled", { defaultValue: "Disabled" })
+        : !entries || issue
+          ? t("dshReasoning.needsLevelShort", { defaultValue: "Needs levels" })
+          : formatDshReasoningLevelsLabel(entries.map(([level]) => level));
 
   const issueText = !issue
     ? undefined
@@ -171,160 +176,209 @@ function DshReasoningLevelsEditor({
                 />
               </span>
             </div>
-            <Switch
-              size="sm"
-              checked={entries !== undefined}
-              disabled={disabled}
-              aria-label={t("dshReasoning.label", {
-                defaultValue: "Reasoning",
-              })}
-              onCheckedChange={(checked) => {
-                setTyping(undefined);
-                onChange(
-                  checked
-                    ? (Object.fromEntries(
-                        dshReasoningInitialEntries(),
-                      ) as DshReasoningEfforts)
-                    : undefined,
-                );
-              }}
-            />
           </div>
+
+          <Select
+            value={mode}
+            onValueChange={(nextMode) => {
+              setTyping(undefined);
+              setAdvancedOpen(false);
+              onChange(
+                dshReasoningWithMode(efforts, nextMode as DshReasoningMode),
+              );
+            }}
+          >
+            <SelectTrigger
+              aria-label={t("dshReasoning.mode", { defaultValue: "Mode" })}
+              disabled={disabled}
+              className="h-8 w-full text-caption"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            {/* 必须盖过外层 z-[1000] 的 Popover：SelectContent 默认的
+                z-[100] 会在下拉向上翻转时把选项画到面板后面。 */}
+            <SelectContent className="z-[1100]">
+              <SelectItem value="inherit">
+                {t("dshReasoning.modeInherit", {
+                  defaultValue: "Follow model catalog (default)",
+                })}
+              </SelectItem>
+              <SelectItem value="disabled">
+                {t("dshReasoning.modeDisabled", {
+                  defaultValue: "No reasoning",
+                })}
+              </SelectItem>
+              <SelectItem value="custom">
+                {t("dshReasoning.modeCustom", {
+                  defaultValue: "Custom levels",
+                })}
+              </SelectItem>
+            </SelectContent>
+          </Select>
 
           {entries ? (
             <div className="space-y-1.5">
-              <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_2rem] items-center gap-1.5 text-caption text-fg-3">
-                <span>
-                  {t("dshReasoning.level", { defaultValue: "Level" })}
-                </span>
-                <span>
-                  {t("dshReasoning.value", { defaultValue: "Value" })}
-                </span>
-                <span />
-              </div>
-              {entries.map(([level, wire], index) => (
-                <div
-                  key={`${level}-${index}`}
-                  className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_2rem] items-center gap-1.5"
-                >
-                  <select
-                    value={level}
-                    aria-label={`${t("dshReasoning.level", {
-                      defaultValue: "Level",
-                    })} ${index + 1}`}
-                    aria-invalid={issueIndex === index ? true : undefined}
-                    disabled={disabled}
-                    onChange={(event) =>
-                      commit(
-                        dshReasoningWithLevel(
-                          entries,
-                          index,
-                          event.target.value,
-                        ),
-                      )
-                    }
-                    className="h-8 w-full min-w-0 rounded-md border border-border-default bg-surface px-1 text-caption text-fg-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  >
-                    {dshReasoningLevelChoices(level, usedLevels).map(
-                      (choice) => (
-                        <option key={choice} value={choice}>
-                          {choice}
-                        </option>
+              <div className="space-y-1">
+                <p className="text-caption text-fg-3">
+                  {t("dshReasoning.levels", {
+                    defaultValue: "Available levels",
+                  })}
+                </p>
+                <p className="text-caption text-fg-3">
+                  {t("dshReasoning.levelsHint", {
+                    defaultValue:
+                      "Click to toggle; order follows the canonical level order.",
+                  })}
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {/* 七档标准芯片 + 存量里的未知/非法档位键（后者以选中态展示，
+                      点击即移除；行内仍会由 dshReasoningIssue 报 unknownLevel）。 */}
+                  {[
+                    ...DSH_REASONING_LEVELS,
+                    ...entries
+                      .map(([level]) => level)
+                      .filter(
+                        (level) =>
+                          !(DSH_REASONING_LEVELS as readonly string[]).includes(
+                            level,
+                          ),
                       ),
-                    )}
-                  </select>
-                  <Input
-                    value={
-                      typing?.index === index
-                        ? typing.text
-                        : formatDshReasoningWire(wire)
-                    }
-                    aria-label={`${t("dshReasoning.value", {
-                      defaultValue: "Value",
-                    })} ${index + 1}`}
-                    aria-invalid={issueIndex === index ? true : undefined}
-                    disabled={disabled || level === "off"}
-                    placeholder={
-                      level === "off"
-                        ? t("dshReasoning.offPlaceholder", {
-                            defaultValue: "Not sent",
-                          })
-                        : level
-                    }
-                    onChange={(event) => {
-                      const text = event.target.value;
-                      setTyping({ index, text });
-                      onChange(
-                        Object.fromEntries(
-                          dshReasoningWithWire(entries, index, text),
-                        ) as DshReasoningEfforts,
-                      );
-                    }}
-                    onBlur={() => {
-                      // 照抄原生 `leaveValue`（client.js:366-369）：失焦时值仍
-                      // 不被接受（例如存量空串 / null / 数字），就回落到该档位
-                      // 默认值，别把无法提交的脏值原样留在表单里。
-                      setTyping(undefined);
-                      const accepted =
-                        (typeof wire === "string" && wire.trim() !== "") ||
-                        (wire === null && level === "off");
-                      if (accepted) return;
-                      const next: DshReasoningEntries = entries.map(
-                        ([entryLevel, entryWire]) => [entryLevel, entryWire],
-                      );
-                      next[index] = [level, dshReasoningDefaultValue(level)];
-                      onChange(Object.fromEntries(next) as DshReasoningEfforts);
-                    }}
-                    className="h-8 w-full min-w-0 text-caption"
-                  />
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    disabled={disabled}
-                    aria-label={t("dshReasoning.removeLevel", {
-                      defaultValue: "Remove level",
-                    })}
-                    title={t("dshReasoning.removeLevel", {
-                      defaultValue: "Remove level",
-                    })}
-                    onClick={() =>
-                      commit(entries.filter((_, i) => i !== index))
-                    }
-                    className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
+                  ].map((level) => {
+                    const selected = entries.some(([key]) => key === level);
+                    return (
+                      <button
+                        key={level}
+                        type="button"
+                        aria-pressed={selected}
+                        aria-label={level}
+                        disabled={disabled}
+                        onClick={() =>
+                          // 未知档位键不在 DshReasoningLevel 联合里，但
+                          // dshReasoningToggleLevel 本就支持移除任意存量键。
+                          commit(
+                            dshReasoningToggleLevel(
+                              entries,
+                              level as DshReasoningLevel,
+                            ),
+                          )
+                        }
+                        className={cn(
+                          "h-7 rounded-md border px-2 text-caption",
+                          selected
+                            ? "border-primary bg-primary/10 text-fg-1"
+                            : "border-border-default text-fg-3 hover:border-border-strong",
+                        )}
+                      >
+                        {level}
+                      </button>
+                    );
+                  })}
                 </div>
-              ))}
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                disabled={disabled || nextLevel === undefined}
-                onClick={() => {
-                  if (nextLevel === undefined) return;
-                  commit([
-                    ...entries,
-                    [nextLevel, dshReasoningDefaultValue(nextLevel)],
-                  ]);
-                }}
-                className="h-7 gap-1 px-1.5 text-caption"
-              >
-                <Plus className="h-3.5 w-3.5" />
-                {t("dshReasoning.addLevel", { defaultValue: "Add level" })}
-              </Button>
+              </div>
+
+              <div className="space-y-1">
+                <button
+                  type="button"
+                  aria-expanded={advancedOpen}
+                  onClick={() => setAdvancedOpen(!advancedOpen)}
+                  className="flex items-center gap-1 text-caption text-fg-3 hover:text-fg-1"
+                >
+                  <ChevronDown
+                    className={cn(
+                      "h-3.5 w-3.5 transition-transform",
+                      advancedOpen && "rotate-180",
+                    )}
+                  />
+                  {t("dshReasoning.advanced", {
+                    defaultValue: "Advanced: API parameter values",
+                  })}
+                </button>
+                {advancedOpen && (
+                  <div className="space-y-1.5">
+                    {entries.map(([level, wire], index) => (
+                      <div
+                        key={`${level}-${index}`}
+                        className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] items-center gap-1.5"
+                      >
+                        <span className="min-w-0 truncate text-caption text-fg-1">
+                          {level}
+                        </span>
+                        <Input
+                          value={
+                            typing?.index === index
+                              ? typing.text
+                              : formatDshReasoningWire(wire)
+                          }
+                          aria-label={`${t("dshReasoning.value", {
+                            defaultValue: "Value",
+                          })} ${index + 1}`}
+                          aria-invalid={issueIndex === index ? true : undefined}
+                          disabled={disabled || level === "off"}
+                          placeholder={
+                            level === "off"
+                              ? t("dshReasoning.offPlaceholder", {
+                                  defaultValue: "Not sent",
+                                })
+                              : level
+                          }
+                          onChange={(event) => {
+                            const text = event.target.value;
+                            setTyping({ index, text });
+                            onChange(
+                              Object.fromEntries(
+                                dshReasoningWithWire(entries, index, text),
+                              ) as DshReasoningEfforts,
+                            );
+                          }}
+                          onBlur={() => {
+                            // 照抄原生 `leaveValue`（client.js:366-369）：失焦时值仍
+                            // 不被接受（例如存量空串 / null / 数字），就回落到该档位
+                            // 默认值，别把无法提交的脏值原样留在表单里。
+                            setTyping(undefined);
+                            const accepted =
+                              (typeof wire === "string" &&
+                                wire.trim() !== "") ||
+                              (wire === null && level === "off");
+                            if (accepted) return;
+                            const next: DshReasoningEntries = entries.map(
+                              ([entryLevel, entryWire]) => [
+                                entryLevel,
+                                entryWire,
+                              ],
+                            );
+                            next[index] = [
+                              level,
+                              dshReasoningDefaultValue(level),
+                            ];
+                            onChange(
+                              Object.fromEntries(next) as DshReasoningEfforts,
+                            );
+                          }}
+                          className="h-8 w-full min-w-0 text-caption"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
               {issueText && (
                 <p role="alert" className="text-caption text-danger-text">
                   {issueText}
                 </p>
               )}
             </div>
-          ) : (
+          ) : efforts === undefined || efforts === false ? (
+            // 没有字段 = 继承目录能力；false = 显式禁用。二者都不是脏值。
             <p className="text-caption text-fg-3">
-              {efforts === false
-                ? t("dshReasoning.disabled", { defaultValue: "Disabled" })
-                : t("dshReasoning.inheritHint", { defaultValue: "" })}
+              {efforts === undefined
+                ? t("dshReasoning.inheritHint")
+                : t("dshReasoning.disabled", { defaultValue: "Disabled" })}
+            </p>
+          ) : (
+            // 其余无 entries 的值都是非普通对象脏值（null/数组/标量）：原生
+            // 对 null 判非法而不是继承，这里照 needsLevel 显式标错。
+            <p role="alert" className="text-caption text-danger-text">
+              {issueText}
             </p>
           )}
         </div>

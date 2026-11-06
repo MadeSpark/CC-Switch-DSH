@@ -12,8 +12,11 @@ import {
   dshReasoningInitialEntries,
   dshReasoningIssue,
   dshReasoningLevelChoices,
+  dshReasoningMode,
   dshReasoningNextLevel,
+  dshReasoningToggleLevel,
   dshReasoningWithLevel,
+  dshReasoningWithMode,
   dshReasoningWithWire,
   findDshReasoningIssue,
   findDshReasoningIssueInConfig,
@@ -97,6 +100,139 @@ describe("readDshReasoningEntries", () => {
 
   it("空对象读成空表（不是 undefined）", () => {
     expect(readDshReasoningEntries({})).toEqual([]);
+  });
+});
+
+describe("dshReasoningMode", () => {
+  it("undefined / false 分别继承与禁用，其余值一律进入 custom", () => {
+    expect(dshReasoningMode(undefined)).toBe("inherit");
+    expect(dshReasoningMode(false)).toBe("disabled");
+    expect(dshReasoningMode({ off: null, low: "low" })).toBe("custom");
+    expect(dshReasoningMode(null)).toBe("custom");
+    expect(dshReasoningMode([])).toBe("custom");
+    expect(dshReasoningMode({})).toBe("custom");
+  });
+});
+
+describe("dshReasoningWithMode", () => {
+  it("inherit 写 undefined，disabled 写 false", () => {
+    expect(dshReasoningWithMode({ low: "low" }, "inherit")).toBeUndefined();
+    expect(dshReasoningWithMode({ low: "low" }, "disabled")).toBe(false);
+    expect(dshReasoningWithMode(undefined, "disabled")).toBe(false);
+  });
+
+  it("custom 对已有普通对象原样返回同一引用（含非法对象）", () => {
+    const existing = { turbo: "turbo", off: null };
+    expect(dshReasoningWithMode(existing, "custom")).toBe(existing);
+
+    const empty = {};
+    expect(dshReasoningWithMode(empty, "custom")).toBe(empty);
+  });
+
+  it("custom 对 false / undefined / 其他非普通对象播种原生初始表", () => {
+    const expected = Object.fromEntries(INITIAL);
+    for (const value of [false, undefined, null, [], "low"]) {
+      const seeded = dshReasoningWithMode(value, "custom");
+      expect(seeded).toEqual(expected);
+      expect(Object.keys(seeded as object)).toEqual(
+        INITIAL.map(([level]) => level),
+      );
+    }
+  });
+});
+
+describe("dshReasoningToggleLevel", () => {
+  it("已有档位直接移除，不修改入参且返回新数组", () => {
+    const entries: DshReasoningEntries = [
+      ["off", null],
+      ["low", "custom-low"],
+      ["turbo", { raw: true }],
+    ];
+    const before = entries.map(([level, value]) => [level, value]);
+    const next = dshReasoningToggleLevel(entries, "low");
+
+    expect(next).toEqual([
+      ["off", null],
+      ["turbo", { raw: true }],
+    ]);
+    expect(entries).toEqual(before);
+    expect(next).not.toBe(entries);
+  });
+
+  it("按规范序插入首个序号更大的档位之前", () => {
+    expect(
+      dshReasoningToggleLevel(
+        [
+          ["off", null],
+          ["low", "low"],
+          ["high", "high"],
+        ],
+        "medium",
+      ),
+    ).toEqual([
+      ["off", null],
+      ["low", "low"],
+      ["medium", "medium"],
+      ["high", "high"],
+    ]);
+
+    expect(
+      dshReasoningToggleLevel(
+        [
+          ["off", null],
+          ["high", "high"],
+        ],
+        "minimal",
+      ),
+    ).toEqual([
+      ["off", null],
+      ["minimal", "minimal"],
+      ["high", "high"],
+    ]);
+  });
+
+  it("未知档位键视为规范序号最大，新档位插在它之前", () => {
+    expect(
+      dshReasoningToggleLevel(
+        [
+          ["off", null],
+          ["turbo", "turbo"],
+        ],
+        "medium",
+      ),
+    ).toEqual([
+      ["off", null],
+      ["medium", "medium"],
+      ["turbo", "turbo"],
+    ]);
+  });
+
+  it("没有更大档位时追加末尾，其余条目键值顺序与引用不变", () => {
+    const marker = { raw: true };
+    const entries: DshReasoningEntries = [
+      ["high", "custom-high"],
+      ["off", null],
+      ["low", marker],
+    ];
+    const before = entries.map(([level, value]) => [level, value]);
+    const next = dshReasoningToggleLevel(entries, "xhigh");
+
+    expect(next).toEqual([
+      ["high", "custom-high"],
+      ["off", null],
+      ["low", marker],
+      ["xhigh", "xhigh"],
+    ]);
+    expect(next[2][1]).toBe(marker);
+    expect(entries).toEqual(before);
+  });
+
+  it("插入 off 的 wire 为 null，其余档位为档位名", () => {
+    for (const level of DSH_REASONING_LEVELS) {
+      expect(dshReasoningToggleLevel([], level)).toEqual([
+        [level, dshReasoningDefaultValue(level)],
+      ]);
+    }
   });
 });
 
@@ -211,10 +347,7 @@ describe("dshReasoningWithLevel", () => {
     ]);
     // 原生 changeLevel 用 wire.length > 0 判空，换档时不 trim、不擅改坏值；
     // 纯空白会在失焦时由 leaveValue 复位。
-    expect(dshReasoningWithLevel(entries, 1, "max")[1]).toEqual([
-      "max",
-      "   ",
-    ]);
+    expect(dshReasoningWithLevel(entries, 1, "max")[1]).toEqual(["max", "   "]);
   });
 
   it("索引越界时原样返回", () => {

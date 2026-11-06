@@ -448,8 +448,12 @@ function CustomAppNavItem({
       icon={app.icon}
       name={app.name}
       color={app.iconColor ?? undefined}
-      className={collapsed ? "h-5 w-5 rounded-[5px]" : "h-6 w-6 rounded-[6px]"}
-      iconClassName={collapsed ? "h-4 w-4" : "h-[18px] w-[18px]"}
+      className={
+        collapsed
+          ? "h-[22px] w-[22px] rounded-[6px]"
+          : "h-[18px] w-[18px] rounded-[5px]"
+      }
+      iconClassName={collapsed ? "!h-5 !w-5" : "!h-4 !w-4"}
     />
   );
   if (collapsed) {
@@ -476,7 +480,7 @@ function CustomAppNavItem({
       onClick={onSelect}
       aria-current={selected ? "page" : undefined}
       className={cn(
-        "mx-2 flex h-8 w-[184px] shrink-0 items-center gap-2 rounded-control px-2 text-start transition-colors hover:bg-subtle",
+        "mx-2 flex h-7 w-[184px] shrink-0 items-center gap-2 rounded-control px-2 text-start transition-colors hover:bg-subtle",
         selected && "bg-selected font-medium hover:bg-selected",
       )}
     >
