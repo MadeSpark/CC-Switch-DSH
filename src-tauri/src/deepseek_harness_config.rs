@@ -344,23 +344,49 @@ pub fn set_pi_ai_provider(provider_id: &str, config: &Value) -> Result<(), AppEr
     }
     ensure_profile(Some(&resolve_active_profile()))?;
     let route_config = Value::Object(config);
-    update_patch_entry_config(
-        &get_patch_path(),
-        PI_AI_NAMESPACE,
-        PI_AI_ENTRY_NAME,
-        move |entry| {
-            let providers = entry
-                .entry("providers".to_string())
-                .or_insert_with(|| Value::Object(serde_json::Map::new()));
-            let providers = providers.as_object_mut().ok_or_else(|| {
-                AppError::Config(format!(
-                    "DeepSeek Harness patch entry {PI_AI_NAMESPACE} has a non-mapping `providers` value"
-                ))
-            })?;
-            providers.insert(provider_id.to_string(), route_config.clone());
-            Ok(())
-        },
-    )
+    let path = get_patch_path();
+    let path_label = path.display().to_string();
+    update_patch_entry_config(&path, PI_AI_NAMESPACE, PI_AI_ENTRY_NAME, move |entry| {
+        let providers = entry
+            .entry("providers".to_string())
+            .or_insert_with(|| Value::Object(serde_json::Map::new()));
+        // A Harness build that saved no custom route can leave the key empty
+        // (`providers:` with no children, an empty list, or a blank string). All of
+        // them spell "no providers", so repair the shape instead of refusing to write.
+        if spells_no_providers(providers) {
+            *providers = Value::Object(serde_json::Map::new());
+        }
+        let providers_kind = describe_value_kind(providers);
+        let providers = providers.as_object_mut().ok_or_else(|| {
+            AppError::Config(format!(
+                "DeepSeek Harness patch entry {PI_AI_NAMESPACE} has a non-mapping `providers` value ({} in {path_label}): edit that entry to a mapping such as `providers: {{}}` and retry",
+                providers_kind,
+            ))
+        })?;
+        providers.insert(provider_id.to_string(), route_config.clone());
+        Ok(())
+    })
+}
+
+/// Whether a `providers` value carries no data but is not spelled as a mapping.
+fn spells_no_providers(value: &Value) -> bool {
+    match value {
+        Value::Null => true,
+        Value::Array(items) => items.is_empty(),
+        Value::String(text) => text.trim().is_empty(),
+        _ => false,
+    }
+}
+
+fn describe_value_kind(value: &Value) -> &'static str {
+    match value {
+        Value::Null => "empty value",
+        Value::Bool(_) => "boolean",
+        Value::Number(_) => "number",
+        Value::String(_) => "string",
+        Value::Array(_) => "list",
+        Value::Object(_) => "mapping",
+    }
 }
 
 pub fn remove_pi_ai_provider(provider_id: &str) -> Result<(), AppError> {
@@ -1021,6 +1047,52 @@ mod tests {
                 .and_then(Yaml::as_hash)
                 .unwrap();
             assert!(!refs.contains_key(&mapping_key("COMPANY_API_KEY")));
+        });
+    }
+
+    #[test]
+    #[serial]
+    fn repairs_empty_pi_ai_providers_instead_of_refusing_to_write() {
+        with_temp_home(|home| {
+            seed_patch(
+                home,
+                "- id: llm-pi-ai\n  name: '@deepseek-ai/dsh-llm-pi-ai'\n  config:\n    providers:\n",
+            );
+            std::fs::write(home.join(".credentials.yaml"), "version: 1\nrefs: {}\n").unwrap();
+
+            let config = serde_json::json!({
+                "displayName": "DeepSeek",
+                "baseURL": "https://api.deepseek.com",
+                "apiKeyEnv": "DEEPSEEK_API_KEY",
+                "apiKey": "secret"
+            });
+            set_pi_ai_provider("direct", &config).unwrap();
+
+            let state = read_native_state().unwrap();
+            assert_eq!(
+                state.providers.get("direct").map(|provider| provider.name.as_str()),
+                Some("DeepSeek")
+            );
+            assert!(read_patch(home).contains("direct"));
+        });
+    }
+
+    #[test]
+    #[serial]
+    fn rejects_pi_ai_providers_that_hold_data_in_a_non_mapping_shape() {
+        with_temp_home(|home| {
+            seed_patch(
+                home,
+                "- id: llm-pi-ai\n  name: '@deepseek-ai/dsh-llm-pi-ai'\n  config:\n    providers:\n      - id: legacy\n",
+            );
+            std::fs::write(home.join(".credentials.yaml"), "version: 1\nrefs: {}\n").unwrap();
+
+            let config = serde_json::json!({ "displayName": "DeepSeek" });
+            let error = set_pi_ai_provider("direct", &config).unwrap_err();
+            let message = error.to_string();
+            assert!(message.contains("non-mapping"), "{message}");
+            assert!(message.contains("list"), "{message}");
+            assert!(message.contains("cordis.patch.yml"), "{message}");
         });
     }
 }
