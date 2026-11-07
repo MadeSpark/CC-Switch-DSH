@@ -243,6 +243,7 @@
     "configJsonHint": "Please fill in complete Claude Code configuration",
     "addProvider": "Add Provider",
     "sortUpdated": "Sort order updated",
+    "sortUpdatedHarness": "Sort order updated. Restart DeepSeek Harness to apply it",
     "usageSaved": "Usage query configuration saved",
     "usageSaveFailed": "Failed to save usage query configuration",
     "geminiConfig": "Gemini Configuration",

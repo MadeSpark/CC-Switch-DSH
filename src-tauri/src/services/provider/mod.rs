@@ -7653,6 +7653,12 @@ impl ProviderService {
     }
 
     /// Update provider sort order
+    ///
+    /// The DeepSeek Harness gets its provider order from the key order of the
+    /// `llm-pi-ai` entry's `providers` mapping, not from `sort_index`, so a drag
+    /// there also has to rewrite that mapping. The Harness file is updated first
+    /// and the database second: a failure leaves both sides on the old order
+    /// instead of splitting them.
     pub fn update_sort_order(
         state: &AppState,
         app_type: AppType,
@@ -7660,14 +7666,46 @@ impl ProviderService {
     ) -> Result<bool, AppError> {
         let mut providers = state.db.get_all_providers(app_type.as_str())?;
 
-        for update in updates {
+        for update in &updates {
             if let Some(provider) = providers.get_mut(&update.id) {
                 provider.sort_index = Some(update.sort_index);
+            }
+        }
+
+        if app_type == AppType::DeepSeekHarness {
+            Self::sync_harness_provider_order(&providers)?;
+        }
+
+        for update in &updates {
+            if let Some(provider) = providers.get(&update.id) {
                 state.db.save_provider(app_type.as_str(), provider)?;
             }
         }
 
         Ok(true)
+    }
+
+    /// Mirror the CC Switch sort order into the DeepSeek Harness patch.
+    ///
+    /// Ranks follow the list query (`sort_index`, then `created_at`, then id) so
+    /// the Harness shows the order the user just dragged. Routes that are not in
+    /// the Harness yet are skipped downstream.
+    fn sync_harness_provider_order(providers: &IndexMap<String, Provider>) -> Result<(), AppError> {
+        let mut ordered: Vec<&Provider> = providers.values().collect();
+        ordered.sort_by(|left, right| {
+            let rank = |provider: &Provider| {
+                (
+                    provider.sort_index.unwrap_or(usize::MAX),
+                    provider.created_at.unwrap_or(i64::MIN),
+                )
+            };
+            rank(left)
+                .cmp(&rank(right))
+                .then_with(|| left.id.cmp(&right.id))
+        });
+        let ids: Vec<String> = ordered.iter().map(|provider| provider.id.clone()).collect();
+        crate::deepseek_harness_config::reorder_pi_ai_providers(&ids)?;
+        Ok(())
     }
 
     /// Query provider usage (re-export)

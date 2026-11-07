@@ -96,10 +96,20 @@ export function useDragSort(providers: Record<string, Provider>, appId: AppId) {
           // 托盘菜单更新失败不影响排序成功
         }
 
+        // The Harness reads its order from the patch file at profile load, so the
+        // new order only shows up after a restart.
         toast.success(
-          t("provider.sortUpdated", {
-            defaultValue: "排序已更新",
-          }),
+          t(
+            appId === "deepseek-harness"
+              ? "provider.sortUpdatedHarness"
+              : "provider.sortUpdated",
+            {
+              defaultValue:
+                appId === "deepseek-harness"
+                  ? "排序已更新，重启 DeepSeek Harness 后生效"
+                  : "排序已更新",
+            },
+          ),
           { closeButton: true },
         );
       } catch (error) {

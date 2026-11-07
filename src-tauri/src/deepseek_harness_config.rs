@@ -446,7 +446,6 @@ fn keep_repaired_value(path: &Path, value: &Value) {
     }
 }
 
-
 pub fn remove_pi_ai_provider(provider_id: &str) -> Result<(), AppError> {
     validate_route_id(provider_id)?;
     let path = get_patch_path();
@@ -476,6 +475,55 @@ pub fn remove_pi_ai_provider(provider_id: &str) -> Result<(), AppError> {
         }
     }
     Ok(())
+}
+
+/// Rewrite the key order of the `llm-pi-ai` entry's `providers` mapping.
+///
+/// The Harness lists providers in mapping order: its adapter declares the
+/// settings directory from `Object.entries(config.providers)` and the models
+/// page only hoists the two DeepSeek routes to the top. Nothing else in the
+/// pipeline re-sorts them, so a reorder in CC Switch has to be persisted here
+/// or the Harness keeps showing its old order forever.
+///
+/// Ids the patch does not know are skipped, and routes the caller does not name
+/// keep their relative order after the named ones. Returns whether the file
+/// changed.
+pub fn reorder_pi_ai_providers(ordered_ids: &[String]) -> Result<bool, AppError> {
+    let path = get_patch_path();
+    if ordered_ids.is_empty() || !path.exists() {
+        return Ok(false);
+    }
+    let Some(Value::Object(mut config)) = patch::read_entry_config(&path, PI_AI_NAMESPACE)? else {
+        return Ok(false);
+    };
+    let Some(providers) = config.get("providers").and_then(Value::as_object) else {
+        return Ok(false);
+    };
+    if providers.is_empty() {
+        return Ok(false);
+    }
+    let mut reordered = serde_json::Map::with_capacity(providers.len());
+    for provider_id in ordered_ids {
+        if let Some(route_config) = providers.get(provider_id) {
+            reordered.insert(provider_id.clone(), route_config.clone());
+        }
+    }
+    for (provider_id, route_config) in providers {
+        if !reordered.contains_key(provider_id) {
+            reordered.insert(provider_id.clone(), route_config.clone());
+        }
+    }
+    if reordered.keys().eq(providers.keys()) {
+        return Ok(false);
+    }
+    config.insert("providers".to_string(), Value::Object(reordered));
+    patch::write_entry_config(
+        &path,
+        PI_AI_NAMESPACE,
+        PI_AI_ENTRY_NAME,
+        &Value::Object(config),
+    )?;
+    Ok(true)
 }
 
 pub fn set_current_model(provider_id: &str, model_id: &str) -> Result<(), AppError> {
@@ -776,6 +824,77 @@ mod tests {
 
     fn read_patch(home: &Path) -> String {
         std::fs::read_to_string(desktop_patch_path(home)).unwrap()
+    }
+
+    fn provider_keys(home: &Path) -> Vec<String> {
+        let entry = patch::read_entry_config(&desktop_patch_path(home), PI_AI_NAMESPACE)
+            .unwrap()
+            .expect("llm-pi-ai entry");
+        entry
+            .get("providers")
+            .and_then(Value::as_object)
+            .expect("providers mapping")
+            .keys()
+            .cloned()
+            .collect()
+    }
+
+    #[test]
+    #[serial]
+    fn reorders_pi_ai_providers_and_keeps_unknown_routes_last() {
+        with_temp_home(|home| {
+            seed_patch(
+                home,
+                "- id: llm-pi-ai\n  name: llm-pi-ai\n  config:\n    providers:\n      alpha:\n        displayName: Alpha\n      beta:\n        displayName: Beta\n      gamma:\n        displayName: Gamma\n",
+            );
+
+            let changed = reorder_pi_ai_providers(&[
+                "gamma".to_string(),
+                "not-in-the-patch".to_string(),
+                "alpha".to_string(),
+            ])
+            .unwrap();
+
+            assert!(changed);
+            assert_eq!(provider_keys(home), vec!["gamma", "alpha", "beta"]);
+            // Values survive the reorder.
+            let text = read_patch(home);
+            assert!(text.contains("displayName: Gamma"), "{text}");
+            assert!(text.contains("displayName: Beta"), "{text}");
+        });
+    }
+
+    #[test]
+    #[serial]
+    fn reorder_pi_ai_providers_is_a_no_op_when_the_order_matches() {
+        with_temp_home(|home| {
+            seed_patch(
+                home,
+                "- id: llm-pi-ai\n  name: llm-pi-ai\n  config:\n    providers:\n      alpha:\n        displayName: Alpha\n      beta:\n        displayName: Beta\n",
+            );
+            let before = read_patch(home);
+
+            let changed =
+                reorder_pi_ai_providers(&["alpha".to_string(), "beta".to_string()]).unwrap();
+
+            assert!(!changed);
+            assert_eq!(read_patch(home), before);
+        });
+    }
+
+    #[test]
+    #[serial]
+    fn reorder_pi_ai_providers_ignores_missing_patch_and_missing_entry() {
+        with_temp_home(|home| {
+            let ids = vec!["alpha".to_string()];
+            assert!(!reorder_pi_ai_providers(&ids).unwrap());
+
+            seed_patch(
+                home,
+                "- id: other-plugin\n  name: other-plugin\n  config:\n    enabled: true\n",
+            );
+            assert!(!reorder_pi_ai_providers(&ids).unwrap());
+        });
     }
 
     #[test]
@@ -1128,7 +1247,10 @@ mod tests {
 
             let state = read_native_state().unwrap();
             assert_eq!(
-                state.providers.get("direct").map(|provider| provider.name.as_str()),
+                state
+                    .providers
+                    .get("direct")
+                    .map(|provider| provider.name.as_str()),
                 Some("DeepSeek")
             );
             assert!(read_patch(home).contains("direct"));
@@ -1155,7 +1277,10 @@ mod tests {
                 .filter_map(Result::ok)
                 .map(|entry| entry.file_name().to_string_lossy().to_string())
                 .find(|name| name.contains(".providers-") && name.ends_with(".bak"));
-            assert!(kept.is_some(), "the dropped value should be kept next to the patch");
+            assert!(
+                kept.is_some(),
+                "the dropped value should be kept next to the patch"
+            );
         });
     }
 }

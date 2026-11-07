@@ -243,6 +243,7 @@
     "configJsonHint": "請填寫完整的 Claude Code 設定",
     "addProvider": "新增供應商",
     "sortUpdated": "排序已更新",
+    "sortUpdatedHarness": "排序已更新，重新啟動 DeepSeek Harness 後生效",
     "usageSaved": "用量查詢設定已儲存",
     "usageSaveFailed": "用量查詢設定儲存失敗",
     "geminiConfig": "Gemini 設定",
